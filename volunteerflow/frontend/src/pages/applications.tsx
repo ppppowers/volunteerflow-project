@@ -31,6 +31,11 @@ import {
   X,
   FileQuestion,
   ClipboardList,
+  Link2,
+  QrCode,
+  Send,
+  ExternalLink,
+  Check,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -269,6 +274,14 @@ const TEMPLATE_STATUS_BADGE: Record<string, { color: string; bg: string; label: 
 const formatDate = (d: string) =>
   new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
+const getApplicationUrl = (templateId: string) => {
+  const base = typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com';
+  return `${base}/apply/${templateId}`;
+};
+
+const getQrCodeUrl = (data: string, size = 200) =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}`;
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 /** Pill / badge renderer */
@@ -484,6 +497,14 @@ export default function Applications() {
   // Submission detail view
   const [activeSubmission, setActiveSubmission] = useState<Submission | null>(null);
 
+  // Share & email modal state
+  const [shareTemplate, setShareTemplate] = useState<ApplicationTemplate | null>(null);
+  const [emailTemplate, setEmailTemplate] = useState<ApplicationTemplate | null>(null);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailMessage, setEmailMessage] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
   // ── Builder actions ──────────────────────────────────────────────────────
 
   const openBuilder = (template?: ApplicationTemplate) => {
@@ -588,6 +609,44 @@ export default function Applications() {
     if (activeSubmission?.id === subId) {
       setActiveSubmission((prev) => (prev ? { ...prev, status: newStatus } : null));
     }
+  };
+
+  // ── Share & email actions ────────────────────────────────────────────────
+
+  const copyLink = (templateId: string) => {
+    const url = getApplicationUrl(templateId);
+    navigator.clipboard.writeText(url).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    });
+  };
+
+  const openShareModal = (tmpl: ApplicationTemplate) => {
+    setShareTemplate(tmpl);
+    setLinkCopied(false);
+  };
+
+  const openEmailModal = (tmpl: ApplicationTemplate) => {
+    setEmailTemplate(tmpl);
+    setEmailTo('');
+    setEmailMessage(`You're invited to apply: ${tmpl.name}`);
+    setEmailSent(false);
+  };
+
+  const handleSendEmail = () => {
+    if (!emailTemplate || !emailTo.trim()) return;
+    // TODO: Replace with real API call
+    console.log('Sending application email:', {
+      to: emailTo,
+      message: emailMessage,
+      applicationUrl: getApplicationUrl(emailTemplate.id),
+      templateName: emailTemplate.name,
+    });
+    setEmailSent(true);
+    setTimeout(() => {
+      setEmailSent(false);
+      setEmailTemplate(null);
+    }, 2500);
   };
 
   const filteredSubmissions = submissions.filter((s) => {
@@ -701,33 +760,45 @@ export default function Applications() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-neutral-100 dark:border-neutral-700">
-                  <Button size="sm" onClick={() => openBuilder(tmpl)}>
-                    <Edit3 className="w-3.5 h-3.5 mr-1.5" />
-                    Edit
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => duplicateTemplate(tmpl)}>
-                    <Copy className="w-3.5 h-3.5 mr-1.5" />
-                    Duplicate
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setSelectedTemplate(tmpl.id);
-                      setView('submissions');
-                    }}
-                  >
-                    <Eye className="w-3.5 h-3.5 mr-1.5" />
-                    Responses
-                  </Button>
-                  <button
-                    onClick={() => deleteTemplate(tmpl.id)}
-                    className="ml-auto p-1.5 rounded hover:bg-danger-50 dark:hover:bg-danger-900/30 text-neutral-400 hover:text-danger-600 dark:hover:text-danger-400 transition-colors"
-                    title="Delete form"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                <div className="mt-4 pt-4 border-t border-neutral-100 dark:border-neutral-700 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" onClick={() => openBuilder(tmpl)}>
+                      <Edit3 className="w-3.5 h-3.5 mr-1.5" />
+                      Edit
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => duplicateTemplate(tmpl)}>
+                      <Copy className="w-3.5 h-3.5 mr-1.5" />
+                      Duplicate
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedTemplate(tmpl.id);
+                        setView('submissions');
+                      }}
+                    >
+                      <Eye className="w-3.5 h-3.5 mr-1.5" />
+                      Responses
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => openShareModal(tmpl)}>
+                      <Link2 className="w-3.5 h-3.5 mr-1.5" />
+                      Share Link
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => openEmailModal(tmpl)}>
+                      <Send className="w-3.5 h-3.5 mr-1.5" />
+                      Email
+                    </Button>
+                    <button
+                      onClick={() => deleteTemplate(tmpl.id)}
+                      className="ml-auto p-1.5 rounded hover:bg-danger-50 dark:hover:bg-danger-900/30 text-neutral-400 hover:text-danger-600 dark:hover:text-danger-400 transition-colors"
+                      title="Delete form"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </Card>
             );
@@ -1137,6 +1208,185 @@ export default function Applications() {
         {view === 'submissions' && renderSubmissions()}
         {view === 'submission_detail' && renderSubmissionDetail()}
       </div>
+
+      {/* ── Share Link / QR Code Modal ────────────────────────────────────── */}
+      {shareTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShareTemplate(null)}
+          />
+          <div className="relative w-full max-w-md bg-white dark:bg-neutral-800 rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-5 pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">Share Application</h2>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{shareTemplate.name}</p>
+              </div>
+              <button
+                onClick={() => setShareTemplate(null)}
+                className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 pb-6 space-y-5">
+              {/* QR Code */}
+              <div className="flex flex-col items-center">
+                <div className="bg-white p-3 rounded-xl shadow-inner border border-neutral-100">
+                  <img
+                    src={getQrCodeUrl(getApplicationUrl(shareTemplate.id), 180)}
+                    alt="Application QR Code"
+                    width={180}
+                    height={180}
+                    className="rounded"
+                  />
+                </div>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-2">
+                  Scan to open the application form
+                </p>
+              </div>
+
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 border-t border-neutral-200 dark:border-neutral-700" />
+                <span className="text-xs text-neutral-400 dark:text-neutral-500 font-medium">OR COPY LINK</span>
+                <div className="flex-1 border-t border-neutral-200 dark:border-neutral-700" />
+              </div>
+
+              {/* Link field */}
+              <div className="flex items-center gap-2">
+                <div className="flex-1 relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value={getApplicationUrl(shareTemplate.id)}
+                    className="w-full pl-3 pr-10 py-2.5 text-sm bg-neutral-50 dark:bg-neutral-700/50 border border-neutral-200 dark:border-neutral-600 rounded-lg text-neutral-700 dark:text-neutral-300 font-mono select-all outline-none focus:ring-2 focus:ring-primary-500"
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                  <ExternalLink className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+                </div>
+                <Button
+                  onClick={() => copyLink(shareTemplate.id)}
+                  className="flex-shrink-0"
+                >
+                  {linkCopied ? (
+                    <>
+                      <Check className="w-4 h-4 mr-1.5" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 mr-1.5" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* Download QR button */}
+              <a
+                href={getQrCodeUrl(getApplicationUrl(shareTemplate.id), 600)}
+                download={`${shareTemplate.name.replace(/\s+/g, '-').toLowerCase()}-qr.png`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium border-2 border-neutral-200 dark:border-neutral-600 rounded-lg text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+              >
+                <QrCode className="w-4 h-4" />
+                Download QR Code (High Res)
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Email Application Modal ───────────────────────────────────────── */}
+      {emailTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setEmailTemplate(null)}
+          />
+          <div className="relative w-full max-w-md bg-white dark:bg-neutral-800 rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-5 pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">Email Application</h2>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{emailTemplate.name}</p>
+              </div>
+              <button
+                onClick={() => setEmailTemplate(null)}
+                className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {emailSent ? (
+              <div className="px-6 pb-8 text-center">
+                <div className="w-14 h-14 bg-success-100 dark:bg-success-900/40 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle className="w-7 h-7 text-success-600 dark:text-success-400" />
+                </div>
+                <p className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Email Sent!</p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+                  The application link has been sent to {emailTo}
+                </p>
+              </div>
+            ) : (
+              <div className="px-6 pb-6 space-y-4">
+                {/* To field */}
+                <div>
+                  <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">
+                    Recipient Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+                    <input
+                      type="email"
+                      value={emailTo}
+                      onChange={(e) => setEmailTo(e.target.value)}
+                      placeholder="volunteer@example.com"
+                      className="w-full pl-10 pr-4 py-2.5 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none placeholder-neutral-400 dark:placeholder-neutral-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Message */}
+                <div>
+                  <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">
+                    Message (optional)
+                  </label>
+                  <textarea
+                    value={emailMessage}
+                    onChange={(e) => setEmailMessage(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2.5 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none resize-none placeholder-neutral-400 dark:placeholder-neutral-500"
+                  />
+                </div>
+
+                {/* Preview of link being sent */}
+                <div className="p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-lg">
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1 font-medium">Link included in email</p>
+                  <p className="text-xs text-primary-600 dark:text-primary-400 font-mono truncate">
+                    {getApplicationUrl(emailTemplate.id)}
+                  </p>
+                </div>
+
+                {/* Send button */}
+                <Button
+                  onClick={handleSendEmail}
+                  disabled={!emailTo.trim()}
+                  className="w-full"
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  Send Application Link
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

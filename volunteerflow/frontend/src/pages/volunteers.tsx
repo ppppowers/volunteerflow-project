@@ -43,6 +43,31 @@ interface EventParticipation {
   hoursContributed?: number;
 }
 
+/** Org-level checklist template item */
+interface ChecklistTemplate {
+  id: string;
+  label: string;
+  description?: string;
+  required: boolean;
+}
+
+/** Org-level certification template */
+interface CertificationTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  icon: string; // emoji
+}
+
+/** Per-volunteer certification entry */
+interface CertificationEntry {
+  templateId: string;
+  granted: boolean;
+  grantedAt?: string;
+  expiresAt?: string;
+  note?: string;
+}
+
 interface Volunteer {
   id: string;
   volunteerId: string;
@@ -60,7 +85,29 @@ interface Volunteer {
   applicationId?: string;
   events: EventParticipation[];
   checklist?: ChecklistItem[];
+  certifications?: CertificationEntry[];
 }
+
+// --- Org-Level Templates (customizable by the organization) ---
+
+const defaultChecklistTemplates: ChecklistTemplate[] = [
+  { id: 'ct_1', label: 'Application Submitted', description: 'Volunteer has submitted their application form', required: true },
+  { id: 'ct_2', label: 'Background Check Passed', description: 'Background screening completed and cleared', required: true },
+  { id: 'ct_3', label: 'Orientation Attended', description: 'Completed new volunteer orientation session', required: true },
+  { id: 'ct_4', label: 'Handbook Acknowledged', description: 'Read and signed the volunteer handbook', required: false },
+  { id: 'ct_5', label: 'Emergency Contact Provided', description: 'Emergency contact info on file', required: true },
+  { id: 'ct_6', label: 'Photo ID Verified', description: 'Government-issued photo ID verified', required: false },
+];
+
+const defaultCertificationTemplates: CertificationTemplate[] = [
+  { id: 'cert_1', name: 'Kennel Certified', description: 'Qualified to work in the kennel area with dogs', icon: '🐕' },
+  { id: 'cert_2', name: 'Cat Room Certified', description: 'Qualified to handle and care for cats', icon: '🐈' },
+  { id: 'cert_3', name: 'Dog Walking', description: 'Approved for off-site dog walking', icon: '🦮' },
+  { id: 'cert_4', name: 'Medical / First Aid', description: 'First aid or medical training certified', icon: '🏥' },
+  { id: 'cert_5', name: 'Event Coordinator', description: 'Qualified to lead volunteer events', icon: '📋' },
+  { id: 'cert_6', name: 'Transport Approved', description: 'Approved for animal transport duties', icon: '🚗' },
+  { id: 'cert_7', name: 'Intake Processing', description: 'Trained on new animal intake procedures', icon: '📝' },
+];
 
 // --- Mock Data ---
 
@@ -91,6 +138,15 @@ const mockVolunteers: Volunteer[] = [
       { id: 'c2', label: 'Orientation Attended', checked: true, createdDate: '2023-01-22' },
       { id: 'c3', label: 'Safety Training', checked: false, createdDate: '2023-01-25' },
       { id: 'c4', label: 'Uniform Received', checked: true, createdDate: '2023-02-01' }
+    ],
+    certifications: [
+      { templateId: 'cert_1', granted: true, grantedAt: '2023-03-10' },
+      { templateId: 'cert_2', granted: true, grantedAt: '2023-04-05' },
+      { templateId: 'cert_3', granted: true, grantedAt: '2023-03-15' },
+      { templateId: 'cert_4', granted: false },
+      { templateId: 'cert_5', granted: true, grantedAt: '2023-08-20' },
+      { templateId: 'cert_6', granted: true, grantedAt: '2023-06-01' },
+      { templateId: 'cert_7', granted: false },
     ]
   },
   {
@@ -117,6 +173,11 @@ const mockVolunteers: Volunteer[] = [
       { id: 'c5', label: 'Medical Clearance', checked: true, createdDate: '2023-02-22' },
       { id: 'c6', label: 'First Aid Certification', checked: true, createdDate: '2023-02-25' },
       { id: 'c7', label: 'CPR Training', checked: true, createdDate: '2023-03-01' }
+    ],
+    certifications: [
+      { templateId: 'cert_1', granted: false },
+      { templateId: 'cert_4', granted: true, grantedAt: '2023-03-10' },
+      { templateId: 'cert_7', granted: true, grantedAt: '2023-04-01' },
     ]
   },
   {
@@ -258,8 +319,8 @@ const mockVolunteers: Volunteer[] = [
 ];
 
 // Export for use in detail page
-export { mockVolunteers };
-export type { Volunteer, EventParticipation, ChecklistItem };
+export { mockVolunteers, defaultChecklistTemplates, defaultCertificationTemplates };
+export type { Volunteer, EventParticipation, ChecklistItem, ChecklistTemplate, CertificationTemplate, CertificationEntry };
 
 export default function Volunteers() {
   const router = useRouter();
