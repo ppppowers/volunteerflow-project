@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const { randomUUID } = require('crypto');
-const { requireStaffAuth, requirePermission, logStaffAudit } = require('./middleware');
+const { requireStaffAuth, requirePermission, validateSupportSession, logStaffAudit } = require('./middleware');
 
 module.exports = function staffOrgsRouter(pool) {
   const router = express.Router();
@@ -272,6 +272,161 @@ module.exports = function staffOrgsRouter(pool) {
       return res.status(500).json({ error: 'Internal server error' });
     }
   });
+
+  // ─── Support View Routes (require active support session) ────────────────────
+
+  // GET /:id/dashboard-stats
+  router.get('/:id/dashboard-stats',
+    requireStaffAuth(pool), requirePermission('orgs.view', pool), validateSupportSession(pool),
+    async (req, res) => {
+      try {
+        const counts = await Promise.all([
+          pool.query('SELECT COUNT(*) FROM volunteers WHERE org_id = $1', [req.params.id]),
+          pool.query('SELECT COUNT(*) FROM events WHERE org_id = $1', [req.params.id]),
+          pool.query("SELECT COUNT(*) FROM applications WHERE org_id = $1 AND status = 'pending'", [req.params.id]),
+          pool.query('SELECT COALESCE(SUM(hours), 0) as total_hours FROM volunteers WHERE org_id = $1', [req.params.id]),
+        ]);
+        const sessionId = req.headers['x-support-session-id'];
+        if (sessionId) {
+          pool.query(
+            'UPDATE support_sessions SET pages_visited = pages_visited || $1::jsonb WHERE id = $2',
+            [JSON.stringify([{ path: req.path, timestamp: new Date() }]), sessionId]
+          ).catch(() => {});
+        }
+        res.json({
+          volunteers: parseInt(counts[0].rows[0].count),
+          events: parseInt(counts[1].rows[0].count),
+          pending_applications: parseInt(counts[2].rows[0].count),
+          total_hours: parseFloat(counts[3].rows[0].total_hours),
+        });
+      } catch (err) {
+        console.error('[staff/orgs] dashboard-stats error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  );
+
+  // GET /:id/volunteers
+  router.get('/:id/volunteers',
+    requireStaffAuth(pool), requirePermission('orgs.view', pool), validateSupportSession(pool),
+    async (req, res) => {
+      try {
+        const result = await pool.query(
+          'SELECT * FROM volunteers WHERE org_id = $1 ORDER BY created_at DESC',
+          [req.params.id]
+        );
+        const sessionId = req.headers['x-support-session-id'];
+        if (sessionId) {
+          pool.query(
+            'UPDATE support_sessions SET pages_visited = pages_visited || $1::jsonb WHERE id = $2',
+            [JSON.stringify([{ path: req.path, timestamp: new Date() }]), sessionId]
+          ).catch(() => {});
+        }
+        res.json({ volunteers: result.rows });
+      } catch (err) {
+        console.error('[staff/orgs] volunteers error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  );
+
+  // GET /:id/events
+  router.get('/:id/events',
+    requireStaffAuth(pool), requirePermission('orgs.view', pool), validateSupportSession(pool),
+    async (req, res) => {
+      try {
+        const result = await pool.query(
+          'SELECT * FROM events WHERE org_id = $1 ORDER BY start_date DESC',
+          [req.params.id]
+        );
+        const sessionId = req.headers['x-support-session-id'];
+        if (sessionId) {
+          pool.query(
+            'UPDATE support_sessions SET pages_visited = pages_visited || $1::jsonb WHERE id = $2',
+            [JSON.stringify([{ path: req.path, timestamp: new Date() }]), sessionId]
+          ).catch(() => {});
+        }
+        res.json({ events: result.rows });
+      } catch (err) {
+        console.error('[staff/orgs] events error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  );
+
+  // GET /:id/applications
+  router.get('/:id/applications',
+    requireStaffAuth(pool), requirePermission('orgs.view', pool), validateSupportSession(pool),
+    async (req, res) => {
+      try {
+        const result = await pool.query(
+          'SELECT * FROM applications WHERE org_id = $1 ORDER BY created_at DESC',
+          [req.params.id]
+        );
+        const sessionId = req.headers['x-support-session-id'];
+        if (sessionId) {
+          pool.query(
+            'UPDATE support_sessions SET pages_visited = pages_visited || $1::jsonb WHERE id = $2',
+            [JSON.stringify([{ path: req.path, timestamp: new Date() }]), sessionId]
+          ).catch(() => {});
+        }
+        res.json({ applications: result.rows });
+      } catch (err) {
+        console.error('[staff/orgs] applications error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  );
+
+  // GET /:id/hours
+  router.get('/:id/hours',
+    requireStaffAuth(pool), requirePermission('orgs.view', pool), validateSupportSession(pool),
+    async (req, res) => {
+      try {
+        const result = await pool.query(
+          'SELECT * FROM volunteers WHERE org_id = $1',
+          [req.params.id]
+        );
+        const sessionId = req.headers['x-support-session-id'];
+        if (sessionId) {
+          pool.query(
+            'UPDATE support_sessions SET pages_visited = pages_visited || $1::jsonb WHERE id = $2',
+            [JSON.stringify([{ path: req.path, timestamp: new Date() }]), sessionId]
+          ).catch(() => {});
+        }
+        res.json({ volunteers: result.rows });
+      } catch (err) {
+        console.error('[staff/orgs] hours error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  );
+
+  // GET /:id/settings
+  router.get('/:id/settings',
+    requireStaffAuth(pool), requirePermission('orgs.view', pool), validateSupportSession(pool),
+    async (req, res) => {
+      try {
+        const result = await pool.query(
+          'SELECT * FROM org_settings WHERE id = $1',
+          [req.params.id]
+        );
+        const sessionId = req.headers['x-support-session-id'];
+        if (sessionId) {
+          pool.query(
+            'UPDATE support_sessions SET pages_visited = pages_visited || $1::jsonb WHERE id = $2',
+            [JSON.stringify([{ path: req.path, timestamp: new Date() }]), sessionId]
+          ).catch(() => {});
+        }
+        res.json({ settings: result.rows[0] || null });
+      } catch (err) {
+        console.error('[staff/orgs] settings error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  );
+
+  // ─── End Support View Routes ──────────────────────────────────────────────────
 
   // GET /:id/activity — union of staff_audit_logs + audit_logs for that org, last 50
   router.get('/:id/activity', requireStaffAuth(pool), requirePermission('audit.view_org', pool), async (req, res) => {
