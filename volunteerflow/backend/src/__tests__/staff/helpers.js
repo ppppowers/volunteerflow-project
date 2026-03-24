@@ -5,7 +5,11 @@ const { Pool } = require('pg');
 // Set TEST_DATABASE_URL in your shell or .env.test before running tests
 // Example: TEST_DATABASE_URL=postgresql://localhost/volunteerflow_test
 function createTestPool() {
-  return new Pool({ connectionString: process.env.TEST_DATABASE_URL || process.env.DATABASE_URL });
+  const connectionString = process.env.TEST_DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('TEST_DATABASE_URL must be set to run tests. Example: TEST_DATABASE_URL=postgresql://localhost/volunteerflow_test');
+  }
+  return new Pool({ connectionString });
 }
 
 function buildTestApp(router, pool) {
