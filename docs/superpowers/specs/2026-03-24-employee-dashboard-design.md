@@ -234,8 +234,17 @@ UPDATE invoices             SET org_id = (SELECT id FROM users LIMIT 1) WHERE or
 UPDATE portal_settings      SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
 UPDATE audit_logs           SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
 
--- org_settings: update the existing 'default' row to use the org's user ID
-UPDATE org_settings SET id = (SELECT id FROM users LIMIT 1) WHERE id = 'default';
+-- org_settings: change primary key from 'default' to the org's user ID.
+-- org_settings does NOT get a separate org_id column — the id IS the org identifier.
+-- This is intentional: org_settings has one row per org, keyed by user ID.
+ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS new_id TEXT;
+UPDATE org_settings SET new_id = (SELECT id FROM users LIMIT 1) WHERE id = 'default';
+-- Note: renaming a PK column requires recreating the table constraint.
+-- Implementation must handle this as an explicit migration step.
+
+-- portal_settings: receives org_id as a standard column (not PK)
+-- because it has multiple rows per org (one per portal_type).
+-- The UPDATE backfill is included in the block above.
 ```
 
 ### Staff roles seed data
@@ -399,7 +408,7 @@ interface Props {
 }
 ```
 
-Mirrors the existing `PlanGate` component exactly. Used throughout the workspace and audit pages to show/hide/disable UI based on staff permissions.
+Mirrors the structural pattern of `PlanGate` (conditional render based on a gate condition) but uses different modes suited to permission UX rather than upsell UX. `PlanGate` modes are `hide | blur | banner`; `PermissionGate` modes are `hide | disable`. Do not copy `PlanGate` as a base — implement `PermissionGate` fresh with the `canDo()` hook from `StaffAuthContext`.
 
 ### `StaffLayout`
 
@@ -461,10 +470,17 @@ GET /api/staff/audit/export    ← requirePermission('audit.export')
 
 ### Staff management
 ```
-GET   /api/staff/employees      ← requirePermission('employees.view')
-POST  /api/staff/employees      ← requirePermission('employees.create')
-GET   /api/staff/employees/:id  ← requirePermission('employees.view')
-PATCH /api/staff/employees/:id  ← requirePermission('employees.edit')
+GET   /api/staff/employees             ← requirePermission('employees.view')
+POST  /api/staff/employees             ← requirePermission('employees.create')
+GET   /api/staff/employees/:id         ← requirePermission('employees.view')
+PATCH /api/staff/employees/:id         ← requirePermission('employees.edit')
+PATCH /api/staff/employees/:id/disable ← requirePermission('employees.disable')
+  - Sets staff_users.is_active = false, logs to staff_audit_logs
+  - Separate route from PATCH /:id to enforce the higher permission explicitly
+  - A disabled staff member's active JWT tokens remain valid until expiry (8h max)
+    — this is a known and accepted limitation for the MVP
+  - Re-enabling uses PATCH /api/staff/employees/:id with { is_active: true },
+    gated by employees.edit
 
 GET   /api/staff/roles          ← requirePermission('roles.view')
 POST  /api/staff/roles          ← requirePermission('roles.manage')
@@ -557,7 +573,7 @@ Fixed amber bar at top of screen throughout the session. Cannot be dismissed.
 Closing the browser tab clears `sessionStorage` but does **not** automatically close the DB record. To prevent orphaned sessions appearing as active indefinitely:
 
 - **Heartbeat:** `SupportViewContext` sends `PATCH /api/staff/support/:id/pages` every 60 seconds while the session is active (this endpoint already exists for page visit logging — the heartbeat sends an empty page visit with `type: 'heartbeat'`)
-- **Stale session expiry:** The backend marks `support_sessions.is_active = false` for any session whose last heartbeat (`pages_visited` last entry timestamp) is more than 5 minutes old. This check runs inside `GET /api/staff/support/active` before returning results — stale sessions are closed inline on read
+- **Stale session expiry:** The backend marks `support_sessions.is_active = false` for any session whose last heartbeat (`pages_visited` last entry timestamp) is more than 5 minutes old. This check runs in three places: (1) inside `GET /api/staff/support/active` before returning results, (2) inside `requireStaffAuth` middleware on every staff request (non-blocking, fire-and-forget query), and (3) inside the `PATCH /api/staff/support/:id/pages` heartbeat endpoint. Running it on `requireStaffAuth` ensures cleanup happens continuously regardless of whether the management panel is open
 - **Maximum session duration:** Sessions older than 4 hours are automatically marked inactive regardless of heartbeat, enforced in the same stale-check logic
 - **`beforeunload`:** `SupportViewContext` registers a `beforeunload` handler that fires `POST /api/staff/support/exit` as a best-effort synchronous `navigator.sendBeacon` call. This closes the session cleanly on normal tab/browser close but is not guaranteed (e.g., on crash or force-kill)
 
@@ -627,7 +643,7 @@ Each phase is independently deployable. P1 is a hard prerequisite. P2–P5 can p
 
 ## 13. Security Checklist
 
-- [ ] `STAFF_JWT_SECRET` is a separate env var from `JWT_SECRET`, minimum 64 chars
+- [ ] `STAFF_JWT_SECRET` is a separate env var from `JWT_SECRET`, minimum 64 chars — add to both `.env.example` files (frontend + backend) with generation command: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
 - [ ] All `/api/staff/*` routes require `requireStaffAuth` — no exceptions
 - [ ] `requirePermission` stacks on every route that touches sensitive data or mutations
 - [ ] `validateSupportSession` middleware applied to all six support view data endpoints
@@ -641,6 +657,8 @@ Each phase is independently deployable. P1 is a hard prerequisite. P2–P5 can p
 - [ ] Multi-org pre-flight assertion in migration script — aborts if `COUNT(users) > 1`
 - [ ] Staff login rate-limited separately from customer login
 - [ ] Staff sessions expire at 8h; no sliding expiry without re-auth
+- [ ] Follow-up migration (P1, after backfill verified): add `NOT NULL` constraint and FK reference to `users(id)` on all `org_id` columns to prevent silent null inserts post-migration
+- [ ] `employees.disable` uses dedicated `PATCH /:id/disable` route (not the generic edit route) to enforce the higher permission boundary explicitly
 - [ ] `staffApi.ts` 401 handler clears only `vf_staff_*` keys — never touches `vf_token` or `vf_user`
 - [ ] Support sessions closed by heartbeat timeout (5min stale) and max duration (4h)
 - [ ] `notes.delete` permission assigned to `role_owner`, `role_super_admin`, `role_admin` in seed
