@@ -6,6 +6,7 @@ module.exports = function createStaffRouter(pool) {
   router.use('/auth', require('./auth')(pool));
   router.use('/orgs', require('./orgs')(pool));
   router.use('/support', require('./support')(pool));
-  // TODO: add audit, employees, roles in subsequent tasks
+  router.use('/audit', require('./audit')(pool));
+  // TODO: add employees, roles in subsequent tasks
   return router;
 };
