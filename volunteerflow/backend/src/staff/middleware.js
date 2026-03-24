@@ -1,13 +1,18 @@
 'use strict';
 const jwt = require('jsonwebtoken');
 
-const STAFF_JWT_SECRET = process.env.STAFF_JWT_SECRET;
 const STALE_MINUTES = 5;
 const MAX_SESSION_HOURS = 4;
 
 // requireStaffAuth(pool) — call as requireStaffAuth(pool) to get middleware fn
 function requireStaffAuth(pool) {
   return async (req, res, next) => {
+    const STAFF_JWT_SECRET = process.env.STAFF_JWT_SECRET;
+    if (!STAFF_JWT_SECRET) {
+      console.error('STAFF_JWT_SECRET is not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'No staff token' });
 
@@ -19,13 +24,14 @@ function requireStaffAuth(pool) {
     }
 
     // Step 1: Synchronous stale-check — commits before is_active gate
-    await pool.query(`
-      UPDATE staff_sessions SET is_active = false
-      WHERE is_active = true AND (
-        last_seen < NOW() - INTERVAL '${STALE_MINUTES} minutes'
-        OR started_at < NOW() - INTERVAL '${MAX_SESSION_HOURS} hours'
-      )
-    `);
+    await pool.query(
+      `UPDATE staff_sessions SET is_active = false
+       WHERE is_active = true AND (
+         last_seen < NOW() - ($1 * INTERVAL '1 minute')
+         OR started_at < NOW() - ($2 * INTERVAL '1 hour')
+       )`,
+      [STALE_MINUTES, MAX_SESSION_HOURS]
+    );
 
     // Step 2: Validate session is still active
     const sessionRes = await pool.query(
