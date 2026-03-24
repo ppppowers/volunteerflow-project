@@ -733,8 +733,12 @@ export default function OrgWorkspacePage() {
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Support view error state
+  // Support view modal state
+  const [showSupportModal, setShowSupportModal] = useState(false);
+  const [supportMode, setSupportMode] = useState<'view_only' | 'support'>('view_only');
+  const [supportReason, setSupportReason] = useState('');
   const [supportViewError, setSupportViewError] = useState<string | null>(null);
+  const [supportViewLoading, setSupportViewLoading] = useState(false);
 
   // Fetch org
   const fetchOrg = useCallback(async () => {
@@ -867,14 +871,34 @@ export default function OrgWorkspacePage() {
   }
 
   // ---- Support view ----
-  async function handleEnterSupportView() {
-    if (!org) return;
+  function handleOpenSupportModal() {
+    setSupportMode('view_only');
+    setSupportReason('');
+    setSupportViewError(null);
+    setShowSupportModal(true);
+  }
+
+  async function handleConfirmSupportView() {
+    if (!org || !supportReason.trim()) return;
+    setSupportViewLoading(true);
     setSupportViewError(null);
     try {
-      await staffApi.post('/support/enter', { org_id: org.id, mode: 'view_only' });
+      const result = await staffApi.post('/support/enter', {
+        orgId: org.id,
+        mode: supportMode,
+        reason: supportReason.trim(),
+      }) as { sessionId: string; orgId: string; orgName: string; mode: string };
+      sessionStorage.setItem('vf_support_session', JSON.stringify({
+        sessionId: result.sessionId,
+        orgId: result.orgId,
+        orgName: result.orgName,
+        mode: result.mode,
+      }));
       router.push(`/staff/support/${org.id}`);
     } catch {
       setSupportViewError('Failed to enter support view. Please try again.');
+    } finally {
+      setSupportViewLoading(false);
     }
   }
 
@@ -951,7 +975,7 @@ export default function OrgWorkspacePage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <PermissionGate perm="support.view_mode">
                   <button
-                    onClick={handleEnterSupportView}
+                    onClick={handleOpenSupportModal}
                     className="rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-4 py-2 transition-colors"
                   >
                     Enter Support View
@@ -1048,6 +1072,77 @@ export default function OrgWorkspacePage() {
           </div>
         </div>
       </div>
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Enter Support View Modal                                          */}
+      {/* ---------------------------------------------------------------- */}
+      {showSupportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-100">Enter Support View</h2>
+              <p className="text-sm text-gray-400 mt-1">
+                You are about to enter support view for <strong className="text-gray-200">{org.org_name}</strong>.
+                All actions will be logged.
+              </p>
+            </div>
+
+            {/* Mode selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                Mode
+              </label>
+              <select
+                value={supportMode}
+                onChange={e => setSupportMode(e.target.value as 'view_only' | 'support')}
+                className="w-full bg-gray-800 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500 border border-gray-700"
+              >
+                <option value="view_only">View Only</option>
+                {canDo('support.impersonation') && (
+                  <option value="support">Full Support</option>
+                )}
+              </select>
+            </div>
+
+            {/* Reason */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                Reason <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                value={supportReason}
+                onChange={e => setSupportReason(e.target.value)}
+                placeholder="Brief description of why you are entering support view…"
+                rows={3}
+                className="w-full bg-gray-800 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500 border border-gray-700 resize-none placeholder-gray-600"
+              />
+            </div>
+
+            {supportViewError && (
+              <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+                {supportViewError}
+              </p>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                onClick={handleConfirmSupportView}
+                disabled={!supportReason.trim() || supportViewLoading}
+                className="flex-1 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 transition-colors"
+              >
+                {supportViewLoading ? 'Entering…' : 'Enter Support View'}
+              </button>
+              <button
+                onClick={() => { setShowSupportModal(false); setSupportViewError(null); }}
+                disabled={supportViewLoading}
+                className="rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 text-sm px-4 py-2 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </StaffLayout>
   );
 }
