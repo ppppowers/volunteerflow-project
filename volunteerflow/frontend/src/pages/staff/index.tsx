@@ -72,18 +72,22 @@ function ManagementMetrics() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
+    Promise.allSettled([
       staffApi.get('/audit?limit=5&category=support_view') as Promise<{ entries?: AuditEntry[]; [k: string]: unknown }>,
       staffApi.get('/support/active') as Promise<ActiveSessions>,
-    ])
-      .then(([auditRes, sessionsRes]) => {
-        if (cancelled) return;
-        setAuditEntries(auditRes?.entries ?? []);
-        setActiveSessions(sessionsRes?.count ?? 0);
-      })
-      .catch(() => {
-        if (!cancelled) setMetricsError(true);
-      });
+    ]).then(([auditResult, activeResult]) => {
+      if (cancelled) return;
+      if (auditResult.status === 'fulfilled') {
+        setAuditEntries(auditResult.value?.entries ?? []);
+      } else {
+        setMetricsError(true);
+      }
+      if (activeResult.status === 'fulfilled') {
+        setActiveSessions(activeResult.value?.count ?? 0);
+      } else {
+        setMetricsError(true);
+      }
+    });
     return () => { cancelled = true; };
   }, []);
 

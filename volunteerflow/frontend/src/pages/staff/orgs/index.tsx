@@ -87,12 +87,12 @@ export default function StaffOrgsPage() {
     }
   }, []);
 
-  // Trigger fetch with debounce on query change, immediately on filter/page change
+  // Trigger fetch with a constant 300ms debounce for all query changes including clears
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       fetchOrgs(query, plan, status, page);
-    }, query !== '' ? 300 : 0);
+    }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };

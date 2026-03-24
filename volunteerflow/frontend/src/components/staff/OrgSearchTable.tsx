@@ -93,11 +93,8 @@ export function OrgSearchTable({ orgs, loading, onOpen }: OrgSearchTableProps) {
 
   function handleOpen(org: Org) {
     writeRecentOrg(org);
-    if (onOpen) {
-      onOpen(org);
-    } else {
-      router.push(`/staff/orgs/${org.id}`);
-    }
+    router.push(`/staff/orgs/${org.id}`);
+    onOpen?.(org); // additive callback, not a replacement
   }
 
   return (
