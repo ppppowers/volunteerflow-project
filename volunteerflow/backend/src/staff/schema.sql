@@ -88,7 +88,8 @@ CREATE TABLE IF NOT EXISTS support_sessions (
   started_at    TIMESTAMPTZ DEFAULT NOW(),
   ended_at      TIMESTAMPTZ,
   is_active     BOOLEAN DEFAULT true,
-  pages_visited JSONB DEFAULT '[]'
+  pages_visited   JSONB DEFAULT '[]',
+  last_heartbeat  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_support_sessions_org    ON support_sessions(org_id);
