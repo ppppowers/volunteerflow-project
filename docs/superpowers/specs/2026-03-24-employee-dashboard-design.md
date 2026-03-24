@@ -160,43 +160,95 @@ CREATE INDEX idx_support_sessions_active ON support_sessions(is_active);
 
 ### Multi-tenancy migration on existing tables
 
-```sql
-ALTER TABLE volunteers        ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE events            ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE applications      ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE members           ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE employees         ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE files             ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE folders           ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE training_courses  ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE training_assignments ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE audit_logs        ADD COLUMN IF NOT EXISTS org_id TEXT;
-ALTER TABLE audit_logs        ADD COLUMN IF NOT EXISTS staff_session_id TEXT;
-ALTER TABLE audit_logs        ADD COLUMN IF NOT EXISTS is_support_view BOOLEAN DEFAULT false;
+**Tables that require `org_id`** (org-scoped data):
+- `volunteers`, `events`, `applications`, `members`, `employees`, `files`, `folders`
+- `training_courses`, `training_assignments`, `training_completions`
+- `audit_logs` (plus two new columns for support-view tracking)
+- `org_settings` — change primary key strategy from `id='default'` to `id = users.id` (org owner's user ID)
+- `portal_settings` — add `org_id` column (currently uses `portal_type` only)
+- `qr_campaigns`, `qr_codes`, `people_groups`, `group_members`
+- `message_templates`, `auto_reminders`, `sent_messages`
+- `login_notifications`, `invoices`
 
--- Backfill existing rows
-UPDATE volunteers        SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE events            SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE applications      SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE members           SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE employees         SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE files             SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE folders           SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE training_courses  SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
-UPDATE audit_logs        SET org_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) WHERE org_id IS NULL;
+**Tables intentionally global** (not org-scoped):
+- `staff_users`, `staff_roles`, `staff_sessions`, `staff_audit_logs`, `org_notes`, `support_sessions` — these are VolunteerFlow-internal
+- `job_notif_rules` — platform-level configuration
+
+```sql
+-- PRE-FLIGHT ASSERTION: abort if more than one user (org) exists.
+-- This backfill is only safe for single-org deployments.
+-- Multi-org environments must perform a manual data mapping before running.
+DO $$
+BEGIN
+  IF (SELECT COUNT(*) FROM users) > 1 THEN
+    RAISE EXCEPTION 'Multi-org backfill not supported. Map org_id manually before migrating.';
+  END IF;
+END $$;
+
+-- Add org_id columns
+ALTER TABLE volunteers           ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE events               ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE applications         ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE members              ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE employees            ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE files                ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE folders              ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE training_courses     ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE training_assignments ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE training_completions ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE qr_campaigns         ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE qr_codes             ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE people_groups        ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE group_members        ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE message_templates    ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE auto_reminders       ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE sent_messages        ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE login_notifications  ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE invoices             ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE portal_settings      ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE audit_logs           ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE audit_logs           ADD COLUMN IF NOT EXISTS staff_session_id TEXT;
+ALTER TABLE audit_logs           ADD COLUMN IF NOT EXISTS is_support_view BOOLEAN DEFAULT false;
+
+-- Backfill all existing rows to the single org
+-- (safe only after the pre-flight assertion above passes)
+UPDATE volunteers           SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE events               SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE applications         SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE members              SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE employees            SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE files                SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE folders              SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE training_courses     SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE training_assignments SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE training_completions SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE qr_campaigns         SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE qr_codes             SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE people_groups        SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE group_members        SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE message_templates    SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE auto_reminders       SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE sent_messages        SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE login_notifications  SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE invoices             SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE portal_settings      SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+UPDATE audit_logs           SET org_id = (SELECT id FROM users LIMIT 1) WHERE org_id IS NULL;
+
+-- org_settings: update the existing 'default' row to use the org's user ID
+UPDATE org_settings SET id = (SELECT id FROM users LIMIT 1) WHERE id = 'default';
 ```
 
 ### Staff roles seed data
 
 | Role ID | Name | Key permissions |
 |---|---|---|
-| `role_owner` | Owner | All permissions |
-| `role_super_admin` | Super Admin | All except `roles.manage`, `employees.disable` |
-| `role_admin` | Admin | `orgs.*` (no plan/billing edit), `notes.*`, `audit.view_org`, `support.view_mode` |
-| `role_manager` | Manager | `orgs.view`, `orgs.edit_basic`, `notes.*`, `audit.view_org`, `employees.view` |
-| `role_senior_support` | Senior Support | `orgs.view`, `orgs.view_sensitive`, `orgs.edit_basic`, `orgs.edit_contact`, `notes.*`, `support.view_mode` |
-| `role_support_agent` | Support Agent | `orgs.view`, `orgs.edit_basic`, `notes.view`, `notes.create`, `support.view_mode` |
-| `role_onboarding` | Onboarding Specialist | `orgs.view`, `notes.view`, `notes.create`, `support.view_mode` |
+| `role_owner` | Owner | All permissions including `roles.manage`, `employees.disable`, `support.impersonation`, `notes.delete` |
+| `role_super_admin` | Super Admin | All except `roles.manage`, `employees.disable` — includes `support.impersonation`, `notes.delete` |
+| `role_admin` | Admin | `orgs.*` (no plan/billing edit), `notes.*` (including `notes.delete`), `audit.view_org`, `audit.view_all`, `support.view_mode`, `dashboard.view_management_metrics`, `employees.view`, `roles.view` |
+| `role_manager` | Manager | `orgs.view`, `orgs.edit_basic`, `notes.view`, `notes.create`, `notes.edit_own`, `audit.view_org`, `employees.view`, `dashboard.view_management_metrics` |
+| `role_senior_support` | Senior Support | `orgs.view`, `orgs.view_sensitive`, `orgs.edit_basic`, `orgs.edit_contact`, `notes.view`, `notes.create`, `notes.edit_own`, `audit.view_org`, `support.view_mode` |
+| `role_support_agent` | Support Agent | `orgs.view`, `orgs.edit_basic`, `notes.view`, `notes.create`, `notes.edit_own`, `support.view_mode` |
+| `role_onboarding` | Onboarding Specialist | `orgs.view`, `notes.view`, `notes.create`, `notes.edit_own`, `support.view_mode` |
 | `role_billing` | Billing Specialist | `orgs.view`, `orgs.view_sensitive`, `orgs.edit_billing`, `notes.view` |
 | `role_read_only` | Read Only | `orgs.view`, `notes.view`, `audit.view_org` |
 
@@ -304,6 +356,13 @@ src/lib/
   staffPermissions.ts          ← canDo() helper + permission constants
 ```
 
+### `staffApi.ts` — key behaviors
+
+- Reads `vf_staff_token` from `localStorage` and sends as `Authorization: Bearer <token>`
+- On `401` response: clears `vf_staff_token` and `vf_staff_user` from `localStorage` (not `vf_token` or `vf_user` — never touch customer auth state), then redirects to `/staff/login`
+- Automatically injects `X-Support-Session-Id` header when a support session is active. Reads the session ID from `sessionStorage.getItem('vf_support_session')` (parsed JSON, field `sessionId`) on every request. This keeps `staffApi.ts` self-contained without requiring callers to pass the header manually.
+- Base URL: `/api/staff` (same origin — no CORS concerns)
+
 ### `StaffAuthContext`
 
 ```typescript
@@ -376,13 +435,15 @@ GET    /api/staff/orgs/:id/activity      ← requirePermission('orgs.view')
 
 ### Support view data endpoints (used by /staff/support/[orgId] pages)
 ```
-GET /api/staff/orgs/:id/dashboard-stats  ← requirePermission('orgs.view')
-GET /api/staff/orgs/:id/volunteers       ← requirePermission('orgs.view')
-GET /api/staff/orgs/:id/events           ← requirePermission('orgs.view')
-GET /api/staff/orgs/:id/applications     ← requirePermission('orgs.view')
-GET /api/staff/orgs/:id/hours            ← requirePermission('orgs.view')
-GET /api/staff/orgs/:id/settings         ← requirePermission('orgs.view')
+GET /api/staff/orgs/:id/dashboard-stats  ← requirePermission('orgs.view') + validateSupportSession
+GET /api/staff/orgs/:id/volunteers       ← requirePermission('orgs.view') + validateSupportSession
+GET /api/staff/orgs/:id/events           ← requirePermission('orgs.view') + validateSupportSession
+GET /api/staff/orgs/:id/applications     ← requirePermission('orgs.view') + validateSupportSession
+GET /api/staff/orgs/:id/hours            ← requirePermission('orgs.view') + validateSupportSession
+GET /api/staff/orgs/:id/settings         ← requirePermission('orgs.view') + validateSupportSession
 ```
+
+**`validateSupportSession` middleware** — required on all support view data endpoints to prevent IDOR. Checks that an active `support_sessions` record exists where `staff_user_id = req.staff.staffId AND org_id = req.params.id AND is_active = true`. Returns `403` if no matching session exists. This ensures a staff member cannot read Org B's data by crafting a URL while holding an open session for Org A.
 
 ### Support sessions
 ```
@@ -491,6 +552,15 @@ Fixed amber bar at top of screen throughout the session. Cannot be dismissed.
 3. Clear `sessionStorage` support data
 4. Navigate back to `/staff/orgs/[orgId]`
 
+### Support session lifecycle — tab close handling
+
+Closing the browser tab clears `sessionStorage` but does **not** automatically close the DB record. To prevent orphaned sessions appearing as active indefinitely:
+
+- **Heartbeat:** `SupportViewContext` sends `PATCH /api/staff/support/:id/pages` every 60 seconds while the session is active (this endpoint already exists for page visit logging — the heartbeat sends an empty page visit with `type: 'heartbeat'`)
+- **Stale session expiry:** The backend marks `support_sessions.is_active = false` for any session whose last heartbeat (`pages_visited` last entry timestamp) is more than 5 minutes old. This check runs inside `GET /api/staff/support/active` before returning results — stale sessions are closed inline on read
+- **Maximum session duration:** Sessions older than 4 hours are automatically marked inactive regardless of heartbeat, enforced in the same stale-check logic
+- **`beforeunload`:** `SupportViewContext` registers a `beforeunload` handler that fires `POST /api/staff/support/exit` as a best-effort synchronous `navigator.sendBeacon` call. This closes the session cleanly on normal tab/browser close but is not guaranteed (e.g., on crash or force-kill)
+
 ### Security properties
 
 | Property | Mechanism |
@@ -502,7 +572,9 @@ Fixed amber bar at top of screen throughout the session. Cannot be dismissed.
 | Pages logged | `X-Support-Session-Id` header triggers page visit append |
 | Reason required | Backend rejects `enter` without `reason` field |
 | Impersonation doubly gated | Middleware permission check + explicit mode check in handler |
-| Session tab-scoped | `sessionStorage` — closing tab ends the visual context |
+| Session tab-scoped (visual) | `sessionStorage` — closing tab clears the support banner |
+| Orphaned session prevention | 60s heartbeat + 5min stale expiry + 4h max duration + `sendBeacon` on unload |
+| IDOR prevented on data endpoints | `validateSupportSession` middleware checks active session matches `:id` param |
 | Session DB-authoritative | `support_sessions` table is the source of truth, not a token |
 
 ---
@@ -558,6 +630,7 @@ Each phase is independently deployable. P1 is a hard prerequisite. P2–P5 can p
 - [ ] `STAFF_JWT_SECRET` is a separate env var from `JWT_SECRET`, minimum 64 chars
 - [ ] All `/api/staff/*` routes require `requireStaffAuth` — no exceptions
 - [ ] `requirePermission` stacks on every route that touches sensitive data or mutations
+- [ ] `validateSupportSession` middleware applied to all six support view data endpoints
 - [ ] Field-level billing data stripped server-side when `orgs.view_sensitive` is absent
 - [ ] No customer token is ever issued during support view
 - [ ] Support session `reason` field enforced as non-empty on backend (not just frontend)
@@ -565,5 +638,10 @@ Each phase is independently deployable. P1 is a hard prerequisite. P2–P5 can p
 - [ ] All mutations write to `staff_audit_logs` before returning a response
 - [ ] Denied access attempts are logged, not silently dropped
 - [ ] `org_id` added to all customer-facing queries (no cross-org data leakage after migration)
+- [ ] Multi-org pre-flight assertion in migration script — aborts if `COUNT(users) > 1`
 - [ ] Staff login rate-limited separately from customer login
 - [ ] Staff sessions expire at 8h; no sliding expiry without re-auth
+- [ ] `staffApi.ts` 401 handler clears only `vf_staff_*` keys — never touches `vf_token` or `vf_user`
+- [ ] Support sessions closed by heartbeat timeout (5min stale) and max duration (4h)
+- [ ] `notes.delete` permission assigned to `role_owner`, `role_super_admin`, `role_admin` in seed
+- [ ] `support.impersonation` permission assigned to `role_owner` and `role_super_admin` in seed
