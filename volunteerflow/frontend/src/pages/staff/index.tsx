@@ -5,91 +5,145 @@ import { useStaffAuth } from '@/context/StaffAuthContext';
 import { staffApi } from '@/lib/staffApi';
 import { PLAN_BADGE, STATUS_BADGE, RecentOrg, loadRecentOrgs, relativeTimeCompact } from '@/components/staff/staffOrgUtils';
 
-interface AuditEntry {
+interface AuditLog {
   id: string;
   action?: string;
   category?: string;
   created_at?: string;
   staff_name?: string;
-  org_name?: string;
+  target_org_name?: string;
+  target_org_id?: string;
   [key: string]: unknown;
 }
 
-interface ActiveSessions {
-  count: number;
+interface AuditResponse {
+  logs?: AuditLog[];
+  total?: number;
   [key: string]: unknown;
+}
+
+interface ActiveSessionsResponse {
+  sessions?: unknown[];
+  count?: number;
+  [key: string]: unknown;
+}
+
+function MetricCard({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 flex flex-col justify-between min-h-[90px]">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</h3>
+      <div className="flex items-end gap-2 mt-2">
+        <span className="text-3xl font-bold text-amber-400">{value}</span>
+        {sub && <span className="text-sm text-gray-500 mb-0.5">{sub}</span>}
+      </div>
+    </div>
+  );
 }
 
 function ManagementMetrics() {
-  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [recentLogs, setRecentLogs] = useState<AuditLog[]>([]);
+  const [recentTotal, setRecentTotal] = useState<number | null>(null);
   const [auditError, setAuditError] = useState(false);
+
   const [activeSessions, setActiveSessions] = useState<number | null>(null);
   const [sessionsError, setSessionsError] = useState(false);
 
+  const [deniedTotal, setDeniedTotal] = useState<number | null>(null);
+
   useEffect(() => {
     let cancelled = false;
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     Promise.allSettled([
-      staffApi.get('/audit?limit=5&category=support_view') as Promise<{ entries?: AuditEntry[]; [k: string]: unknown }>,
-      staffApi.get('/support/active') as Promise<ActiveSessions>,
-    ]).then(([auditResult, activeResult]) => {
+      staffApi.get('/audit?limit=10') as Promise<AuditResponse>,
+      staffApi.get('/support/active') as Promise<ActiveSessionsResponse>,
+      staffApi.get(`/audit?category=auth&outcome=denied&from=${encodeURIComponent(sevenDaysAgo)}`) as Promise<AuditResponse>,
+    ]).then(([recentResult, activeResult, deniedResult]) => {
       if (cancelled) return;
-      if (auditResult.status === 'fulfilled') {
-        setAuditEntries(auditResult.value?.entries ?? []);
+
+      if (recentResult.status === 'fulfilled') {
+        const logs = recentResult.value?.logs ?? [];
+        setRecentLogs(logs);
+        setRecentTotal(recentResult.value?.total ?? logs.length);
       } else {
         setAuditError(true);
       }
+
       if (activeResult.status === 'fulfilled') {
-        setActiveSessions(activeResult.value?.count ?? 0);
+        const sessions = activeResult.value?.sessions;
+        setActiveSessions(
+          activeResult.value?.count ?? (Array.isArray(sessions) ? sessions.length : 0)
+        );
       } else {
         setSessionsError(true);
       }
+
+      if (deniedResult.status === 'fulfilled') {
+        const logs = deniedResult.value?.logs ?? [];
+        setDeniedTotal(deniedResult.value?.total ?? logs.length);
+      }
+      // denied failures are non-critical — no error state needed
     });
     return () => { cancelled = true; };
   }, []);
 
+  // Derive unique org count from recentLogs
+  const orgsAccessed = recentLogs.length > 0
+    ? new Set(recentLogs.map(l => l.target_org_id).filter(Boolean)).size
+    : null;
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      {/* Recent Support Activity */}
+    <div className="space-y-4">
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <MetricCard
+          label="Recent Actions (7d)"
+          value={auditError ? '—' : (recentTotal === null ? '…' : recentTotal)}
+        />
+        <MetricCard
+          label="Active Sessions Now"
+          value={sessionsError ? '—' : (activeSessions === null ? '…' : activeSessions)}
+          sub={activeSessions === 1 ? 'session' : 'sessions'}
+        />
+        <MetricCard
+          label="Denied Attempts (7d)"
+          value={deniedTotal === null ? '…' : deniedTotal}
+        />
+        <MetricCard
+          label="Orgs Accessed (7d)"
+          value={auditError ? '—' : (orgsAccessed === null ? '…' : orgsAccessed)}
+        />
+      </div>
+
+      {/* Recent high-risk list */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Recent Support Activity</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Recent Staff Actions</h3>
         {auditError ? (
           <p className="text-sm text-gray-600 italic">Unable to load recent activity.</p>
-        ) : auditEntries.length === 0 ? (
+        ) : recentLogs.length === 0 ? (
           <p className="text-sm text-gray-600">No recent activity.</p>
         ) : (
           <ul className="space-y-2">
-            {auditEntries.map(entry => (
+            {recentLogs.slice(0, 5).map(entry => (
               <li key={entry.id} className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm text-gray-300 truncate">
-                    {entry.action ?? entry.category ?? 'Support view'}
-                    {entry.org_name ? <span className="text-gray-500"> — {entry.org_name}</span> : null}
+                    {entry.action ?? entry.category ?? 'action'}
+                    {entry.target_org_name
+                      ? <span className="text-gray-500"> — {entry.target_org_name}</span>
+                      : null}
                   </p>
                   {entry.staff_name && (
                     <p className="text-xs text-gray-600 truncate">{entry.staff_name}</p>
                   )}
                 </div>
                 {entry.created_at && (
-                  <span className="text-xs text-gray-600 whitespace-nowrap">{relativeTimeCompact(entry.created_at)}</span>
+                  <span className="text-xs text-gray-600 whitespace-nowrap">
+                    {relativeTimeCompact(entry.created_at)}
+                  </span>
                 )}
               </li>
             ))}
           </ul>
-        )}
-      </div>
-
-      {/* Active Support Sessions */}
-      <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 flex flex-col justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Active Support Sessions</h3>
-        {sessionsError ? (
-          <p className="text-sm text-gray-600 italic">Unable to load session count.</p>
-        ) : (
-          <div className="flex items-end gap-2">
-            <span className="text-4xl font-bold text-amber-400">
-              {activeSessions === null ? '—' : activeSessions}
-            </span>
-            <span className="text-sm text-gray-500 mb-1">active session{activeSessions !== 1 ? 's' : ''}</span>
-          </div>
         )}
       </div>
     </div>
