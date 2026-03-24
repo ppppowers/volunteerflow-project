@@ -332,6 +332,8 @@ function NotesTab({
   orgId,
   notes,
   notesLoading,
+  notesError,
+  deleteError,
   showNoteEditor,
   editingNote,
   onNewNote,
@@ -344,6 +346,8 @@ function NotesTab({
   orgId: string;
   notes: Note[];
   notesLoading: boolean;
+  notesError: string | null;
+  deleteError: string | null;
   showNoteEditor: boolean;
   editingNote: Note | null;
   onNewNote: () => void;
@@ -369,6 +373,18 @@ function NotesTab({
           </button>
         </PermissionGate>
       </div>
+
+      {/* Error banners */}
+      {notesError && (
+        <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+          {notesError}
+        </p>
+      )}
+      {deleteError && (
+        <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+          {deleteError}
+        </p>
+      )}
 
       {/* Note list */}
       {notesLoading ? (
@@ -409,9 +425,9 @@ function NotesTab({
                 </div>
               </div>
               {/* Tags */}
-              {note.tags.length > 0 && (
+              {(note.tags?.length ?? 0) > 0 && (
                 <div className="flex flex-wrap gap-1">
-                  {note.tags.map(tag => (
+                  {note.tags?.map(tag => (
                     <span
                       key={tag}
                       className="rounded-full bg-gray-700 text-gray-300 px-2 py-0.5 text-xs"
@@ -453,9 +469,11 @@ function NotesTab({
 function ActivityTab({
   activity,
   activityLoading,
+  activityError,
 }: {
   activity: AuditEntry[];
   activityLoading: boolean;
+  activityError: string | null;
 }) {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -469,6 +487,11 @@ function ActivityTab({
 
   return (
     <div className="space-y-4">
+      {activityError && (
+        <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+          {activityError}
+        </p>
+      )}
       {/* Date filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <label className="flex items-center gap-2 text-xs text-gray-400">
@@ -693,9 +716,11 @@ export default function OrgWorkspacePage() {
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [notesLoading, setNotesLoading] = useState(true);
+  const [notesError, setNotesError] = useState<string | null>(null);
 
   const [activity, setActivity] = useState<AuditEntry[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState<string | null>(null);
 
   // Edit state
   const [editingOrg, setEditingOrg] = useState(false);
@@ -706,6 +731,10 @@ export default function OrgWorkspacePage() {
   // Note editor state
   const [showNoteEditor, setShowNoteEditor] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Support view error state
+  const [supportViewError, setSupportViewError] = useState<string | null>(null);
 
   // Fetch org
   const fetchOrg = useCallback(async () => {
@@ -726,11 +755,12 @@ export default function OrgWorkspacePage() {
   const fetchNotes = useCallback(async () => {
     if (!id) return;
     setNotesLoading(true);
+    setNotesError(null);
     try {
       const data = await staffApi.get(`/orgs/${id}/notes?page=1`) as { notes: Note[] };
       setNotes(data.notes ?? []);
     } catch {
-      // notes fail silently — show empty
+      setNotesError('Failed to load notes. Please refresh.');
     } finally {
       setNotesLoading(false);
     }
@@ -740,11 +770,12 @@ export default function OrgWorkspacePage() {
   const fetchActivity = useCallback(async () => {
     if (!id) return;
     setActivityLoading(true);
+    setActivityError(null);
     try {
       const data = await staffApi.get(`/orgs/${id}/activity`) as { activity: AuditEntry[] };
       setActivity(data.activity ?? []);
     } catch {
-      // activity fail silently
+      setActivityError('Failed to load activity. Please refresh.');
     } finally {
       setActivityLoading(false);
     }
@@ -826,22 +857,24 @@ export default function OrgWorkspacePage() {
 
   async function handleDeleteNote(noteId: string) {
     if (!id) return;
+    setDeleteError(null);
     try {
       await staffApi.delete(`/orgs/${id}/notes/${noteId}`);
       setNotes(prev => prev.filter(n => n.id !== noteId));
     } catch {
-      // silently ignore — could add toast in future
+      setDeleteError('Failed to delete note. Please try again.');
     }
   }
 
   // ---- Support view ----
   async function handleEnterSupportView() {
     if (!org) return;
+    setSupportViewError(null);
     try {
       await staffApi.post('/support/enter', { org_id: org.id, mode: 'view_only' });
       router.push(`/staff/support/${org.id}`);
     } catch {
-      // ignore
+      setSupportViewError('Failed to enter support view. Please try again.');
     }
   }
 
@@ -914,24 +947,31 @@ export default function OrgWorkspacePage() {
             </div>
 
             {/* Right — actions */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <PermissionGate perm="support.view_mode">
-                <button
-                  onClick={handleEnterSupportView}
-                  className="rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-4 py-2 transition-colors"
-                >
-                  Enter Support View
-                </button>
-              </PermissionGate>
-              <PermissionGate perm="orgs.edit_basic">
-                <button
-                  onClick={handleStartEdit}
-                  disabled={editingOrg}
-                  className="rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 transition-colors"
-                >
-                  Edit Org
-                </button>
-              </PermissionGate>
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <PermissionGate perm="support.view_mode">
+                  <button
+                    onClick={handleEnterSupportView}
+                    className="rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-4 py-2 transition-colors"
+                  >
+                    Enter Support View
+                  </button>
+                </PermissionGate>
+                <PermissionGate perm="orgs.edit_basic">
+                  <button
+                    onClick={handleStartEdit}
+                    disabled={editingOrg}
+                    className="rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 transition-colors"
+                  >
+                    Edit Org
+                  </button>
+                </PermissionGate>
+              </div>
+              {supportViewError && (
+                <p className="text-sm text-red-400 bg-red-900/20 border border-red-800 rounded px-3 py-2">
+                  {supportViewError}
+                </p>
+              )}
             </div>
           </div>
 
@@ -976,10 +1016,12 @@ export default function OrgWorkspacePage() {
                 orgId={id}
                 notes={notes}
                 notesLoading={notesLoading}
+                notesError={notesError}
+                deleteError={deleteError}
                 showNoteEditor={showNoteEditor}
                 editingNote={editingNote}
-                onNewNote={() => { setShowNoteEditor(true); setEditingNote(null); }}
-                onEditNote={note => { setEditingNote(note); setShowNoteEditor(false); }}
+                onNewNote={() => { setShowNoteEditor(true); setEditingNote(null); setDeleteError(null); }}
+                onEditNote={note => { setEditingNote(note); setShowNoteEditor(false); setDeleteError(null); }}
                 onDeleteNote={handleDeleteNote}
                 onSaveNote={handleSaveNote}
                 onCancelNote={() => { setShowNoteEditor(false); setEditingNote(null); }}
@@ -988,7 +1030,7 @@ export default function OrgWorkspacePage() {
             )}
 
             {activeTab === 'activity' && (
-              <ActivityTab activity={activity} activityLoading={activityLoading} />
+              <ActivityTab activity={activity} activityLoading={activityLoading} activityError={activityError} />
             )}
 
             {activeTab === 'billing' && (

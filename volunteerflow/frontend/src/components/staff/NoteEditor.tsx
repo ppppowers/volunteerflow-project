@@ -16,7 +16,7 @@ interface NoteEditorProps {
 export function NoteEditor({ orgId, existingNote, onSave, onCancel }: NoteEditorProps) {
   const [content, setContent] = useState(existingNote?.content ?? '');
   const [isImportant, setIsImportant] = useState(existingNote?.is_important ?? false);
-  const [tagsInput, setTagsInput] = useState(existingNote?.tags.join(', ') ?? '');
+  const [tagsInput, setTagsInput] = useState(existingNote?.tags?.join(', ') ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
