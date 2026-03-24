@@ -127,7 +127,7 @@ CREATE INDEX idx_staff_audit_category   ON staff_audit_logs(category);
 -- Internal notes on customer orgs
 CREATE TABLE org_notes (
   id           TEXT PRIMARY KEY,
-  org_id       TEXT NOT NULL,
+  org_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_by   TEXT NOT NULL REFERENCES staff_users(id),
   content      TEXT NOT NULL,
   is_important BOOLEAN DEFAULT false,
@@ -135,7 +135,7 @@ CREATE TABLE org_notes (
   created_at   TIMESTAMPTZ DEFAULT NOW(),
   updated_at   TIMESTAMPTZ,
   updated_by   TEXT REFERENCES staff_users(id),
-  is_deleted   BOOLEAN DEFAULT false
+  is_deleted   BOOLEAN DEFAULT false   -- soft delete; row is never physically removed
 );
 
 CREATE INDEX idx_org_notes_org_id ON org_notes(org_id);
@@ -285,11 +285,14 @@ feature_flags.manage        dashboard.view_management_metrics
 
 ### `requireStaffAuth`
 
-- Reads `Authorization: Bearer <token>` header
-- Verifies against `STAFF_JWT_SECRET` (separate from `JWT_SECRET`)
-- Validates `staff_sessions` record is active
-- Attaches `req.staff = { staffId, email, name, roleId, permissions, sessionId }`
-- Updates `staff_sessions.last_seen` non-blocking
+Execution order (sequence matters for correctness):
+1. Read and verify JWT against `STAFF_JWT_SECRET` — return `401` if invalid or expired
+2. **Synchronously** run the stale-session check: `UPDATE staff_sessions SET is_active = false WHERE (NOW() - last_seen > interval '5 minutes' OR started_at < NOW() - interval '4 hours') AND is_active = true` — commits before proceeding
+3. Validate `staff_sessions` record is still `is_active = true` — return `401` if stale (catches sessions just expired in step 2)
+4. Attach `req.staff = { staffId, email, name, roleId, permissions, sessionId }`
+5. Update `staff_sessions.last_seen = NOW()` non-blocking (fire and forget)
+
+The stale-check (step 2) runs synchronously and commits before the `is_active` gate (step 3) is evaluated. There is no one-request grace window — a stale session is rejected on the same request that expires it.
 
 ### `requirePermission(perm)`
 
@@ -519,7 +522,7 @@ Stored in `localStorage` as `vf_staff_recent_orgs` — max 10 entries `{ id, nam
 
 **Account** — Org info (editable if `orgs.edit_basic`) · owner info (read-only) · plan/subscription (editable if `orgs.edit_plan`) · account status controls (editable if `orgs.edit_status`). Fields staff cannot edit render as read-only with a lock icon — never hidden, always visible.
 
-**Notes** — Notes list (newest first, important pinned) · create/edit/delete with permission gates · tag filtering · important flag
+**Notes** — Notes list (newest first, important pinned) · create/edit/delete with permission gates · tag filtering · important flag. **Soft-delete contract:** `DELETE /api/staff/orgs/:id/notes/:nid` sets `is_deleted = true` — the row is never physically removed. All `GET` queries for notes filter `WHERE is_deleted = false`. Soft-deleted notes are not surfaced in any UI but remain in the database for audit purposes. `updated_at` and `updated_by` are set on soft-delete to preserve the who/when of the deletion.
 
 **Activity** — Combined timeline: staff actions from `staff_audit_logs WHERE target_org_id = :id` plus customer actions from `audit_logs WHERE org_id = :id`. Source-labeled (Staff / Org). Filterable by type, date range.
 
@@ -560,7 +563,7 @@ Fixed amber bar at top of screen throughout the session. Cannot be dismissed.
 - Data fetched from `/api/staff/orgs/:id/*` (staff endpoints) — never from customer endpoints
 - Frontend sends `X-Support-Session-Id` header on every request; backend appends page visit to `support_sessions.pages_visited`
 - In `view_only` mode: all edit/create/delete buttons hidden
-- In `support` mode with `support.impersonation`: controlled edits allowed; every action logs to both `staff_audit_logs` (with `support_session_id`) and `audit_logs` (with `is_support_view = true`)
+- In `support` mode with `support.impersonation`: the customer view shell surfaces edit controls where the staff member has the corresponding staff permission. **Write operations use the existing staff API routes** (`PATCH /api/staff/orgs/:id`, `POST /api/staff/orgs/:id/notes`, etc.) — no new write endpoints are added for support mode. The `X-Support-Session-Id` header (automatically injected by `staffApi.ts`) causes each staff handler to set `support_session_id` on the `staff_audit_logs` entry and `is_support_view = true` on any `audit_logs` entry. No new route definitions are required beyond those already in Section 7.
 
 ### Exit flow
 1. Staff clicks "Exit Support View"
@@ -655,7 +658,7 @@ Each phase is independently deployable. P1 is a hard prerequisite. P2–P5 can p
 - [ ] Denied access attempts are logged, not silently dropped
 - [ ] `org_id` added to all customer-facing queries (no cross-org data leakage after migration)
 - [ ] Multi-org pre-flight assertion in migration script — aborts if `COUNT(users) > 1`
-- [ ] Staff login rate-limited separately from customer login
+- [ ] Staff login rate-limited separately from customer login: max 10 attempts per 15-minute window per IP, using `express-rate-limit` with `windowMs: 15 * 60 * 1000, max: 10` — more conservative than the customer auth endpoint
 - [ ] Staff sessions expire at 8h; no sliding expiry without re-auth
 - [ ] Follow-up migration (P1, after backfill verified): add `NOT NULL` constraint and FK reference to `users(id)` on all `org_id` columns to prevent silent null inserts post-migration
 - [ ] `employees.disable` uses dedicated `PATCH /:id/disable` route (not the generic edit route) to enforce the higher permission boundary explicitly
