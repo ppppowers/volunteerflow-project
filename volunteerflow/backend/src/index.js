@@ -3,12 +3,11 @@ const cors = require('cors');
 const helmet = require('helmet');
 require('dotenv').config();
 
-const { initializeDatabase } = require('./db');
+const { pool, initializeDatabase } = require('./db');
 const createStaffRouter = require('./staff/index');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-let pool = null;
 
 // Validate STAFF_JWT_SECRET before startup
 if (!process.env.STAFF_JWT_SECRET || process.env.STAFF_JWT_SECRET.length < 32) {
@@ -16,11 +15,8 @@ if (!process.env.STAFF_JWT_SECRET || process.env.STAFF_JWT_SECRET.length < 32) {
   process.exit(1);
 }
 
-// Initialize database on startup
+// Initialize database on startup (runs schema migrations; pool is already created in db.js)
 initializeDatabase()
-  .then((dbPool) => {
-    pool = dbPool;
-  })
   .catch((error) => {
     console.error('Failed to initialize database:', error);
     process.exit(1);
