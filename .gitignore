@@ -1,0 +1,13 @@
+# Git worktrees
+.worktrees/
+
+# Root-level artifacts — do not track
+node_modules/
+*.zip
+*.log
+
+# One-time scaffold/generator scripts — not part of the application
+create-zip.js
+generate-complete.js
+generate-fixed.js
+generate-*.js
