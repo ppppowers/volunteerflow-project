@@ -4,15 +4,27 @@ const helmet = require('helmet');
 require('dotenv').config();
 
 const { initializeDatabase } = require('./db');
+const createStaffRouter = require('./staff/index');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+let pool = null;
+
+// Validate STAFF_JWT_SECRET before startup
+if (!process.env.STAFF_JWT_SECRET || process.env.STAFF_JWT_SECRET.length < 32) {
+  console.error('ERROR: STAFF_JWT_SECRET must be set (minimum 32 characters)');
+  process.exit(1);
+}
 
 // Initialize database on startup
-initializeDatabase().catch((error) => {
-  console.error('Failed to initialize database:', error);
-  process.exit(1);
-});
+initializeDatabase()
+  .then((dbPool) => {
+    pool = dbPool;
+  })
+  .catch((error) => {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  });
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
@@ -127,9 +139,12 @@ app.get('/health', (req, res) => {
 app.get('/api', (req, res) => {
   res.json({
     message: 'VolunteerFlow API v1.0.0',
-    endpoints: ['/api/volunteers', '/api/events', '/api/applications', '/api/dashboard/stats'],
+    endpoints: ['/api/volunteers', '/api/events', '/api/applications', '/api/dashboard/stats', '/api/staff'],
   });
 });
+
+// ===== STAFF ROUTER =====
+app.use('/api/staff', createStaffRouter(pool));
 
 // ===== VOLUNTEERS CRUD =====
 app.get('/api/volunteers', (req, res) => {
