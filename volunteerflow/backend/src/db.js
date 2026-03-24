@@ -10,7 +10,14 @@ async function initializeDatabase() {
   try {
     console.log('Initializing database...');
 
-    // Read and execute staff schema
+    // 1. Customer schema (creates users, volunteers, events, applications, etc.)
+    //    Must run BEFORE staff schema because staff/schema.sql references users(id)
+    //    via the org_notes table foreign key.
+    const customerSchema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+    await pool.query(customerSchema);
+
+    // 2. Staff schema (creates staff_roles, staff_users, staff_sessions, org_notes, etc.
+    //    Depends on: users table from customer schema)
     const staffSchema = fs.readFileSync(path.join(__dirname, 'staff/schema.sql'), 'utf8');
     await pool.query(staffSchema);
 
