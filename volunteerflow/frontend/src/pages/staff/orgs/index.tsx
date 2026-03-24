@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { StaffLayout } from '@/components/staff/StaffLayout';
 import { OrgSearchTable, Org } from '@/components/staff/OrgSearchTable';
 import { staffApi } from '@/lib/staffApi';
+import { PLAN_BADGE, STATUS_BADGE, RecentOrg, loadRecentOrgs } from '@/components/staff/staffOrgUtils';
 
 interface ApiResponse {
   orgs: Org[];
@@ -12,42 +13,12 @@ interface ApiResponse {
   pages: number;
 }
 
-interface RecentOrg {
-  id: string;
-  org_name: string;
-  plan: string;
-  status: string;
-}
-
 const PLAN_OPTIONS = ['all', 'free', 'starter', 'pro', 'enterprise'];
 const STATUS_OPTIONS = ['all', 'active', 'suspended', 'trial', 'cancelled'];
 
-const PLAN_BADGE: Record<string, string> = {
-  free:       'bg-gray-700 text-gray-300',
-  starter:    'bg-blue-900 text-blue-300',
-  pro:        'bg-purple-900 text-purple-300',
-  enterprise: 'bg-amber-900 text-amber-300',
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  active:    'bg-green-900 text-green-300',
-  suspended: 'bg-red-900 text-red-300',
-  trial:     'bg-yellow-900 text-yellow-300',
-  cancelled: 'bg-gray-700 text-gray-400',
-};
-
-function loadRecentOrgs(): RecentOrg[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem('vf_staff_recent_orgs');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
 export default function StaffOrgsPage() {
   const router = useRouter();
+  const [routerReady, setRouterReady] = useState(false);
 
   const [query, setQuery] = useState('');
   const [plan, setPlan] = useState('all');
@@ -64,6 +35,15 @@ export default function StaffOrgsPage() {
   useEffect(() => {
     setRecentOrgs(loadRecentOrgs());
   }, []);
+
+  // Read URL params once when router is ready
+  useEffect(() => {
+    if (!router.isReady) return;
+    if (router.query.q) setQuery(String(router.query.q));
+    if (router.query.plan && typeof router.query.plan === 'string') setPlan(router.query.plan);
+    if (router.query.status && typeof router.query.status === 'string') setStatus(router.query.status);
+    setRouterReady(true);
+  }, [router.isReady]);
 
   // Debounce ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -88,7 +68,9 @@ export default function StaffOrgsPage() {
   }, []);
 
   // Trigger fetch with a constant 300ms debounce for all query changes including clears
+  // Gate on routerReady to avoid double-fetch (empty params then URL params)
   useEffect(() => {
+    if (!routerReady) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       fetchOrgs(query, plan, status, page);
@@ -96,7 +78,7 @@ export default function StaffOrgsPage() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, plan, status, page, fetchOrgs]);
+  }, [query, plan, status, page, fetchOrgs, routerReady]);
 
   // Reset to page 1 when filters change
   function handleQueryChange(val: string) {

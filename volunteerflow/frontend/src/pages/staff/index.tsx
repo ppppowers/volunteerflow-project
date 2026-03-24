@@ -1,15 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { StaffLayout } from '@/components/staff/StaffLayout';
 import { useStaffAuth } from '@/context/StaffAuthContext';
 import { staffApi } from '@/lib/staffApi';
-
-interface RecentOrg {
-  id: string;
-  org_name: string;
-  plan: string;
-  status: string;
-}
+import { PLAN_BADGE, STATUS_BADGE, RecentOrg, loadRecentOrgs, relativeTimeCompact } from '@/components/staff/staffOrgUtils';
 
 interface AuditEntry {
   id: string;
@@ -26,49 +20,11 @@ interface ActiveSessions {
   [key: string]: unknown;
 }
 
-const PLAN_BADGE: Record<string, string> = {
-  free:       'bg-gray-700 text-gray-300',
-  starter:    'bg-blue-900 text-blue-300',
-  pro:        'bg-purple-900 text-purple-300',
-  enterprise: 'bg-amber-900 text-amber-300',
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  active:    'bg-green-900 text-green-300',
-  suspended: 'bg-red-900 text-red-300',
-  trial:     'bg-yellow-900 text-yellow-300',
-  cancelled: 'bg-gray-700 text-gray-400',
-};
-
-function loadRecentOrgs(): RecentOrg[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem('vf_staff_recent_orgs');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function relativeTime(dateStr?: string): string {
-  if (!dateStr) return '';
-  try {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 2) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs / 24)}d ago`;
-  } catch {
-    return '';
-  }
-}
-
 function ManagementMetrics() {
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [auditError, setAuditError] = useState(false);
   const [activeSessions, setActiveSessions] = useState<number | null>(null);
-  const [metricsError, setMetricsError] = useState(false);
+  const [sessionsError, setSessionsError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,29 +36,25 @@ function ManagementMetrics() {
       if (auditResult.status === 'fulfilled') {
         setAuditEntries(auditResult.value?.entries ?? []);
       } else {
-        setMetricsError(true);
+        setAuditError(true);
       }
       if (activeResult.status === 'fulfilled') {
         setActiveSessions(activeResult.value?.count ?? 0);
       } else {
-        setMetricsError(true);
+        setSessionsError(true);
       }
     });
     return () => { cancelled = true; };
   }, []);
-
-  if (metricsError) {
-    return (
-      <p className="text-sm text-gray-600 italic">Unable to load metrics.</p>
-    );
-  }
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       {/* Recent Support Activity */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 space-y-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Recent Support Activity</h3>
-        {auditEntries.length === 0 ? (
+        {auditError ? (
+          <p className="text-sm text-gray-600 italic">Unable to load recent activity.</p>
+        ) : auditEntries.length === 0 ? (
           <p className="text-sm text-gray-600">No recent activity.</p>
         ) : (
           <ul className="space-y-2">
@@ -118,7 +70,7 @@ function ManagementMetrics() {
                   )}
                 </div>
                 {entry.created_at && (
-                  <span className="text-xs text-gray-600 whitespace-nowrap">{relativeTime(entry.created_at)}</span>
+                  <span className="text-xs text-gray-600 whitespace-nowrap">{relativeTimeCompact(entry.created_at)}</span>
                 )}
               </li>
             ))}
@@ -129,12 +81,16 @@ function ManagementMetrics() {
       {/* Active Support Sessions */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 flex flex-col justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Active Support Sessions</h3>
-        <div className="flex items-end gap-2">
-          <span className="text-4xl font-bold text-amber-400">
-            {activeSessions === null ? '—' : activeSessions}
-          </span>
-          <span className="text-sm text-gray-500 mb-1">active session{activeSessions !== 1 ? 's' : ''}</span>
-        </div>
+        {sessionsError ? (
+          <p className="text-sm text-gray-600 italic">Unable to load session count.</p>
+        ) : (
+          <div className="flex items-end gap-2">
+            <span className="text-4xl font-bold text-amber-400">
+              {activeSessions === null ? '—' : activeSessions}
+            </span>
+            <span className="text-sm text-gray-500 mb-1">active session{activeSessions !== 1 ? 's' : ''}</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -146,7 +102,6 @@ export default function StaffHomePage() {
 
   const [searchInput, setSearchInput] = useState('');
   const [recentOrgs, setRecentOrgs] = useState<RecentOrg[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setRecentOrgs(loadRecentOrgs());
@@ -174,7 +129,6 @@ export default function StaffHomePage() {
           <p className="text-sm text-gray-500">Find any org by name, email, or ID</p>
           <form onSubmit={handleSearch} className="w-full max-w-xl flex gap-2 mt-2">
             <input
-              ref={inputRef}
               type="text"
               placeholder="Org name, email, or ID…"
               value={searchInput}
