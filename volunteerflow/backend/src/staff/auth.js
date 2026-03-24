@@ -3,15 +3,19 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const { randomBytes } = require('crypto');
 const { requireStaffAuth, logStaffAudit } = require('./middleware');
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { error: 'Too many login attempts. Try again in 15 minutes.' },
-});
+// Pre-computed dummy hash used for constant-time comparison on unknown emails
+const DUMMY_HASH = '$2a$12$IVkFerINWz0bHQq1GQ/3.OjMLuBvKCf3zUfDgVeqcnS8y4eKXM/KS';
 
 module.exports = function staffAuthRouter(pool) {
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { error: 'Too many login attempts. Try again in 15 minutes.' },
+  });
+
   const router = express.Router();
 
   router.post('/login', loginLimiter, async (req, res) => {
@@ -27,14 +31,16 @@ module.exports = function staffAuthRouter(pool) {
     `, [email.toLowerCase()]);
 
     const user = result.rows[0];
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Always run bcrypt — even for unknown emails (prevents timing oracle)
+    const hashToCheck = user ? user.password_hash : DUMMY_HASH;
+    const valid = await bcrypt.compare(password, hashToCheck);
+
+    if (!user || !valid) return res.status(401).json({ error: 'Invalid credentials' });
     if (!user.is_active) return res.status(403).json({ error: 'Account disabled' });
 
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-
     const perms = Object.keys(user.permissions || {}).filter(k => user.permissions[k]);
-    const sessionId = `ss_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const sessionId = `ss_${randomBytes(16).toString('hex')}`;
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
 
     await pool.query(
