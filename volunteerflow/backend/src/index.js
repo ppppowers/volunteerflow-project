@@ -11,8 +11,9 @@ const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-const { pool, initDb } = require('./db');
+const { pool, initializeDatabase } = require('./db');
 const { dispatchBulk, dispatchJobNotif, buildFrom } = require('./mailer');
+const createStaffRouter = require('./staff/index');
 
 // ── Supabase Storage client ───────────────────────────────────────────────────
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
@@ -70,6 +71,19 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 // Public-facing backend URL used to generate QR tracking redirect links.
 // Must be set in production to your actual backend domain.
 const BACKEND_PUBLIC_URL = (process.env.BACKEND_PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+
+// Validate STAFF_JWT_SECRET before startup
+if (!process.env.STAFF_JWT_SECRET || process.env.STAFF_JWT_SECRET.length < 32) {
+  console.error('ERROR: STAFF_JWT_SECRET must be set (minimum 32 characters)');
+  process.exit(1);
+}
+
+// Initialize database on startup
+initializeDatabase()
+  .catch((error) => {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  });
 
 // ===== MIDDLEWARE =====
 app.use(helmet());
@@ -999,6 +1013,9 @@ app.delete('/api/data/account', requireAuth, async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to delete organization data' });
   }
 });
+
+// ===== STAFF ROUTER =====
+app.use('/api/staff', createStaffRouter(pool));
 
 // ===== VOLUNTEERS CRUD =====
 app.get('/api/volunteers', requireAuth, async (req, res) => {

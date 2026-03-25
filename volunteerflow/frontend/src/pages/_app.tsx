@@ -6,6 +6,9 @@ import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { PlanProvider } from '@/context/usePlan';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { StaffAuthProvider } from '@/context/StaffAuthContext';
+import { SupportViewProvider } from '@/context/SupportViewContext';
+import { SupportBanner } from '@/components/staff/SupportBanner';
 
 // Self-hosted via Next.js — no external CDN call, no privacy leak
 const inter = Inter({
@@ -47,29 +50,33 @@ function AppearanceInit() {
 
 export default function App({ Component, pageProps }: AppProps) {
   return (
-    // Apply the font variable to the root so Tailwind's font-sans picks it up
     <div className={`${inter.variable} font-sans`} style={{ display: 'contents' }}>
-      <ThemeProvider>
-        <PlanProvider initialPlan="discover">
-          <ErrorBoundary>
-            <AppearanceInit />
-            <Component {...pageProps} />
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 4000,
-                style: {
-                  background: '#fff',
-                  color: '#171717',
-                  border: '1px solid #e5e5e5',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                },
-              }}
-            />
-          </ErrorBoundary>
-        </PlanProvider>
-      </ThemeProvider>
+      <StaffAuthProvider>
+        <SupportViewProvider>
+          <ThemeProvider>
+            <PlanProvider initialPlan="discover">
+              <ErrorBoundary>
+                <SupportBanner />
+                <AppearanceInit />
+                <Component {...pageProps} />
+                <Toaster
+                  position="top-right"
+                  toastOptions={{
+                    duration: 4000,
+                    style: {
+                      background: '#fff',
+                      color: '#171717',
+                      border: '1px solid #e5e5e5',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                    },
+                  }}
+                />
+              </ErrorBoundary>
+            </PlanProvider>
+          </ThemeProvider>
+        </SupportViewProvider>
+      </StaffAuthProvider>
     </div>
   );
 }

@@ -1,9 +1,11 @@
 /**
  * PostgreSQL connection pool and schema initialisation.
  *
- * Call initDb() once at server startup. All routes import `pool` directly.
+ * Call initializeDatabase() once at server startup. All routes import `pool` directly.
  */
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
 const bcrypt = require('bcryptjs');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -737,10 +739,24 @@ async function initDb() {
     // Migrate legacy role values to org_roles IDs
     await client.query(`UPDATE users SET role = 'role_admin'  WHERE role = 'admin'`);
     await client.query(`UPDATE users SET role = 'role_member' WHERE role = 'member'`);
+    // Load staff schema (tables + seed roles) — runs after customer tables exist
+    await loadStaffSchema(client);
     console.log('[DB] Schema ready.');
   } finally {
     client.release();
   }
 }
 
-module.exports = { pool, initDb };
+// Also load the staff schema (staff tables must come AFTER customer tables)
+async function loadStaffSchema(client) {
+  const staffSchemaPath = path.join(__dirname, 'staff/schema.sql');
+  if (fs.existsSync(staffSchemaPath)) {
+    const staffSql = fs.readFileSync(staffSchemaPath, 'utf8');
+    await client.query(staffSql);
+  }
+}
+
+// initializeDatabase is the canonical startup function (alias kept for compatibility)
+const initializeDatabase = initDb;
+
+module.exports = { pool, initDb, initializeDatabase };
