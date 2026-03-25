@@ -1,5 +1,7 @@
 // frontend/src/pages/applications.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
+import Head from 'next/head';
 import Layout from '@/components/Layout';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -117,142 +119,9 @@ const QUESTION_TYPES: {
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
 
-const MOCK_TEMPLATES: ApplicationTemplate[] = [
-  {
-    id: 'tmpl_1',
-    name: 'General Volunteer Application',
-    description: 'Standard application for new volunteers joining our organization.',
-    status: 'active',
-    createdAt: '2024-02-15',
-    updatedAt: '2024-03-01',
-    submissionCount: 24,
-    questions: [
-      { id: 'q1', type: 'short_text', label: 'Full Name', required: true, placeholder: 'Enter your full name' },
-      { id: 'q2', type: 'email', label: 'Email Address', required: true, placeholder: 'you@example.com' },
-      { id: 'q3', type: 'long_text', label: 'Why do you want to volunteer?', required: true, placeholder: 'Tell us about your motivation...' },
-      {
-        id: 'q4',
-        type: 'checkbox_group',
-        label: 'Areas of Interest',
-        required: false,
-        options: [
-          { id: 'o1', label: 'Community Outreach' },
-          { id: 'o2', label: 'Event Planning' },
-          { id: 'o3', label: 'Mentorship' },
-          { id: 'o4', label: 'Administrative Support' },
-        ],
-      },
-      {
-        id: 'q5',
-        type: 'radio',
-        label: 'Availability',
-        required: true,
-        options: [
-          { id: 'o5', label: 'Weekdays' },
-          { id: 'o6', label: 'Weekends' },
-          { id: 'o7', label: 'Both' },
-        ],
-      },
-      { id: 'q6', type: 'toggle', label: 'I have volunteered before', required: false },
-    ],
-  },
-  {
-    id: 'tmpl_2',
-    name: 'Youth Mentorship Program',
-    description: 'Application for adults interested in mentoring at-risk youth.',
-    status: 'active',
-    createdAt: '2024-01-20',
-    updatedAt: '2024-02-28',
-    submissionCount: 12,
-    questions: [
-      { id: 'q7', type: 'short_text', label: 'Full Name', required: true },
-      { id: 'q8', type: 'number', label: 'Age', required: true, placeholder: '18' },
-      { id: 'q9', type: 'long_text', label: 'Relevant experience with youth', required: true },
-      { id: 'q10', type: 'checkbox', label: 'I agree to a background check', required: true },
-      { id: 'q11', type: 'date', label: 'Earliest available start date', required: true },
-    ],
-  },
-  {
-    id: 'tmpl_3',
-    name: 'Emergency Response Team',
-    description: 'Draft application for the upcoming disaster response volunteer corps.',
-    status: 'draft',
-    createdAt: '2024-03-05',
-    updatedAt: '2024-03-05',
-    submissionCount: 0,
-    questions: [],
-  },
-];
+const MOCK_TEMPLATES: ApplicationTemplate[] = [];
 
-const MOCK_SUBMISSIONS: Submission[] = [
-  {
-    id: 'sub_1',
-    templateId: 'tmpl_1',
-    templateName: 'General Volunteer Application',
-    volunteerName: 'Sarah Johnson',
-    volunteerEmail: 'sarah.j@email.com',
-    submittedAt: '2024-03-10',
-    status: 'pending',
-    answers: {
-      q1: 'Sarah Johnson',
-      q2: 'sarah.j@email.com',
-      q3: 'I have experience organizing community events and would love to help coordinate initiatives in my neighborhood.',
-      q4: ['Community Outreach', 'Event Planning'],
-      q5: 'Both',
-      q6: true,
-    },
-  },
-  {
-    id: 'sub_2',
-    templateId: 'tmpl_1',
-    templateName: 'General Volunteer Application',
-    volunteerName: 'Michael Chen',
-    volunteerEmail: 'michael.c@email.com',
-    submittedAt: '2024-03-08',
-    status: 'approved',
-    answers: {
-      q1: 'Michael Chen',
-      q2: 'michael.c@email.com',
-      q3: 'Available all day and happy to assist with any tasks needed.',
-      q4: ['Administrative Support'],
-      q5: 'Weekdays',
-      q6: false,
-    },
-  },
-  {
-    id: 'sub_3',
-    templateId: 'tmpl_2',
-    templateName: 'Youth Mentorship Program',
-    volunteerName: 'Emily Davis',
-    volunteerEmail: 'emily.d@email.com',
-    submittedAt: '2024-03-09',
-    status: 'rejected',
-    answers: {
-      q7: 'Emily Davis',
-      q8: '28',
-      q9: 'I work with children regularly and am passionate about mentorship.',
-      q10: true,
-      q11: '2024-04-01',
-    },
-  },
-  {
-    id: 'sub_4',
-    templateId: 'tmpl_1',
-    templateName: 'General Volunteer Application',
-    volunteerName: 'David Martinez',
-    volunteerEmail: 'david.m@email.com',
-    submittedAt: '2024-03-11',
-    status: 'pending',
-    answers: {
-      q1: 'David Martinez',
-      q2: 'david.m@email.com',
-      q3: 'I have medical training and experience working with elderly populations.',
-      q4: ['Community Outreach', 'Mentorship'],
-      q5: 'Weekends',
-      q6: true,
-    },
-  },
-];
+const MOCK_SUBMISSIONS: Submission[] = [];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -477,13 +346,43 @@ function QuestionRow({
   );
 }
 
+// ─── API <-> Frontend adapter ─────────────────────────────────────────────────
+
+interface ApiApplication {
+  id: string;
+  volunteerId: string;
+  eventId: string;
+  status: string;
+  message?: string;
+  createdAt: string;
+  volunteer?: { firstName: string; lastName: string; email: string };
+  event?: { title: string };
+}
+
+function mapApiApplication(a: ApiApplication): Submission {
+  return {
+    id: a.id,
+    templateId: a.eventId,
+    templateName: a.event?.title ?? 'Event Application',
+    volunteerName: a.volunteer
+      ? `${a.volunteer.firstName} ${a.volunteer.lastName}`.trim()
+      : a.volunteerId,
+    volunteerEmail: a.volunteer?.email ?? '',
+    submittedAt: a.createdAt.split('T')[0],
+    status: (a.status?.toLowerCase() ?? 'pending') as SubmissionStatus,
+    answers: { message: a.message ?? '' },
+  };
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function Applications() {
   // State
   const [view, setView] = useState<PageView>('templates');
   const [templates, setTemplates] = useState<ApplicationTemplate[]>(MOCK_TEMPLATES);
-  const [submissions, setSubmissions] = useState<Submission[]>(MOCK_SUBMISSIONS);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(true);
+  const [usingMockData, setUsingMockData] = useState(false);
 
   // Builder state
   const [editingTemplate, setEditingTemplate] = useState<ApplicationTemplate | null>(null);
@@ -504,6 +403,27 @@ export default function Applications() {
   const [emailMessage, setEmailMessage] = useState('');
   const [emailSent, setEmailSent] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+
+  // Fetch applications from backend on mount; fall back to mock if unreachable
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingSubmissions(true);
+    api.get<ApiApplication[]>('/applications?limit=100')
+      .then((data) => {
+        if (!cancelled) {
+          setSubmissions(data.map(mapApiApplication));
+          setUsingMockData(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSubmissions(MOCK_SUBMISSIONS);
+          setUsingMockData(true);
+        }
+      })
+      .finally(() => { if (!cancelled) setLoadingSubmissions(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Builder actions ──────────────────────────────────────────────────────
 
@@ -604,10 +524,19 @@ export default function Applications() {
 
   // ── Submission actions ───────────────────────────────────────────────────
 
-  const handleStatusChange = (subId: string, newStatus: SubmissionStatus) => {
+  const handleStatusChange = async (subId: string, newStatus: SubmissionStatus) => {
+    // Optimistic update
     setSubmissions((prev) => prev.map((s) => (s.id === subId ? { ...s, status: newStatus } : s)));
     if (activeSubmission?.id === subId) {
       setActiveSubmission((prev) => (prev ? { ...prev, status: newStatus } : null));
+    }
+    if (!usingMockData) {
+      try {
+        await api.put(`/applications/${subId}`, { status: newStatus.toUpperCase() });
+      } catch {
+        // Revert on failure
+        setSubmissions((prev) => prev.map((s) => (s.id === subId ? { ...s, status: activeSubmission?.status ?? s.status } : s)));
+      }
     }
   };
 
@@ -635,13 +564,7 @@ export default function Applications() {
 
   const handleSendEmail = () => {
     if (!emailTemplate || !emailTo.trim()) return;
-    // TODO: Replace with real API call
-    console.log('Sending application email:', {
-      to: emailTo,
-      message: emailMessage,
-      applicationUrl: getApplicationUrl(emailTemplate.id),
-      templateName: emailTemplate.name,
-    });
+    // TODO: Replace with real email API call
     setEmailSent(true);
     setTimeout(() => {
       setEmailSent(false);
@@ -954,7 +877,17 @@ export default function Applications() {
         title="Submissions"
         subtitle="Review and manage incoming applications"
         action={
-          <Button variant="outline">
+          <Button variant="outline" onClick={() => {
+            const rows = [
+              ['Name', 'Email', 'Form', 'Submitted', 'Status'],
+              ...submissions.map((s) => [s.volunteerName, s.volunteerEmail, s.templateName, s.submittedAt, s.status]),
+            ];
+            const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+            a.download = 'submissions.csv';
+            a.click();
+          }}>
             <FileText className="w-4 h-4 mr-2" />
             Export Report
           </Button>
@@ -1022,9 +955,32 @@ export default function Applications() {
         </div>
       </Card>
 
+      {/* Offline banner */}
+      {usingMockData && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700 rounded-lg text-sm text-warning-700 dark:text-warning-400">
+          <Clock className="w-4 h-4 flex-shrink-0" />
+          <span>Backend offline — showing demo data. Status changes will not be saved.</span>
+        </div>
+      )}
+
       {/* Submissions list */}
       <div className="space-y-3">
-        {filteredSubmissions.length === 0 ? (
+        {loadingSubmissions ? (
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i} className="p-5 animate-pulse">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-neutral-200 dark:bg-neutral-700 flex-shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3.5 bg-neutral-200 dark:bg-neutral-700 rounded w-1/3" />
+                    <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2" />
+                  </div>
+                  <div className="h-5 w-16 bg-neutral-200 dark:bg-neutral-700 rounded-full" />
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : filteredSubmissions.length === 0 ? (
           <Card className="p-8 text-center">
             <FileText className="w-12 h-12 text-neutral-300 dark:text-neutral-600 mx-auto mb-3" />
             <p className="text-neutral-500 dark:text-neutral-400">No submissions match your filters</p>
@@ -1202,6 +1158,7 @@ export default function Applications() {
 
   return (
     <Layout>
+      <Head><title>Applications — VolunteerFlow</title></Head>
       <div className="space-y-6 max-w-6xl mx-auto">
         {view === 'templates' && renderTemplates()}
         {view === 'builder' && renderBuilder()}

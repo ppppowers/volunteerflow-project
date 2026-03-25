@@ -1,5 +1,7 @@
 // frontend/src/pages/events.tsx
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import Head from 'next/head';
+import { api, ApiError } from '@/lib/api';
 import Layout from '@/components/Layout';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -39,6 +41,14 @@ import {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+interface ShiftPermissions {
+  allowSelfSignup: boolean;
+  requireLeaderApproval: boolean;
+  restrictToRoles: string[];
+  visibleToPublic: boolean;
+  allowWaitlist: boolean;
+}
+
 interface Shift {
   id: string;
   name: string;
@@ -49,6 +59,7 @@ interface Shift {
   signedUp: number;
   role: string;
   description?: string;
+  permissions: ShiftPermissions;
 }
 
 type VolunteerStatus = 'approved' | 'pending' | 'rejected';
@@ -157,86 +168,17 @@ const formatTime = (t: string) => {
   return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${ampm}`;
 };
 
+const defaultShiftPermissions = (): ShiftPermissions => ({
+  allowSelfSignup: true,
+  requireLeaderApproval: false,
+  restrictToRoles: [],
+  visibleToPublic: true,
+  allowWaitlist: false,
+});
+
 // ─── Mock Data ───────────────────────────────────────────────────────────────
 
-const MOCK_EVENTS: VolunteerEvent[] = [
-  {
-    id: 'evt_1',
-    title: 'Community Clean-up Drive',
-    description: 'Join us for our monthly neighborhood clean-up event. We will be picking up litter, planting flowers, and beautifying our shared spaces. All supplies provided — just bring water and a positive attitude!',
-    category: 'environment',
-    coverImage: 'https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?w=800&h=400&fit=crop',
-    images: [],
-    location: 'Central Park — West Entrance',
-    address: '123 Park Ave, New York, NY 10001',
-    startDate: '2024-04-15',
-    endDate: '2024-04-15',
-    status: 'published',
-    visibility: 'public',
-    maxVolunteers: 50,
-    registrationDeadline: '2024-04-12',
-    shifts: [
-      { id: 's1', name: 'Morning Shift', date: '2024-04-15', startTime: '08:00', endTime: '12:00', capacity: 25, signedUp: 18, role: 'General Volunteer', description: 'Pick-up and planting crew' },
-      { id: 's2', name: 'Afternoon Shift', date: '2024-04-15', startTime: '13:00', endTime: '17:00', capacity: 25, signedUp: 12, role: 'General Volunteer', description: 'Beautification and final sweep' },
-    ],
-    eligibility: { allowedStatuses: ['approved'], requireApplication: false, requireBackgroundCheck: false, customRequirements: [] },
-    tags: ['outdoor', 'environment', 'family-friendly'],
-    createdAt: '2024-03-01',
-    updatedAt: '2024-03-10',
-    contactName: 'Maria Lopez',
-    contactEmail: 'maria@volunteerflow.com',
-    notes: 'Rain date: April 22.',
-  },
-  {
-    id: 'evt_2',
-    title: 'Youth Mentorship Saturday',
-    description: 'Spend the morning mentoring local youth through structured activities including homework help, career exploration, and team-building exercises.',
-    category: 'youth',
-    coverImage: 'https://images.unsplash.com/photo-1529390079861-591de354faf5?w=800&h=400&fit=crop',
-    images: [],
-    location: 'Downtown Community Center',
-    address: '456 Main St, New York, NY 10002',
-    startDate: '2024-04-20',
-    endDate: '2024-04-20',
-    status: 'published',
-    visibility: 'public',
-    maxVolunteers: 15,
-    registrationDeadline: '2024-04-17',
-    shifts: [
-      { id: 's3', name: 'Full Day', date: '2024-04-20', startTime: '09:00', endTime: '14:00', capacity: 15, signedUp: 9, role: 'Mentor', description: 'One-on-one mentorship session' },
-    ],
-    eligibility: { allowedStatuses: ['approved'], requireApplication: true, applicationTemplateId: 'tmpl_2', requireBackgroundCheck: true, minimumAge: 21, customRequirements: ['Must complete orientation training'] },
-    tags: ['mentorship', 'education', 'youth'],
-    createdAt: '2024-03-05',
-    updatedAt: '2024-03-12',
-    contactName: 'James Wright',
-    contactEmail: 'james@volunteerflow.com',
-  },
-  {
-    id: 'evt_3',
-    title: 'Food Bank Distribution Day',
-    description: 'Help sort, pack, and distribute food boxes to families in need across our three distribution zones.',
-    category: 'community',
-    coverImage: 'https://images.unsplash.com/photo-1593113598332-cd288d649433?w=800&h=400&fit=crop',
-    images: [],
-    location: 'Regional Food Bank Warehouse',
-    address: '789 Industrial Blvd, New York, NY 10003',
-    startDate: '2024-04-25',
-    endDate: '2024-04-25',
-    status: 'draft',
-    visibility: 'public',
-    maxVolunteers: 40,
-    shifts: [
-      { id: 's4', name: 'Sorting', date: '2024-04-25', startTime: '07:00', endTime: '10:00', capacity: 15, signedUp: 0, role: 'Sorter' },
-      { id: 's5', name: 'Packing', date: '2024-04-25', startTime: '10:00', endTime: '13:00', capacity: 15, signedUp: 0, role: 'Packer' },
-      { id: 's6', name: 'Distribution', date: '2024-04-25', startTime: '13:00', endTime: '16:00', capacity: 10, signedUp: 0, role: 'Driver / Distributor' },
-    ],
-    eligibility: { allowedStatuses: ['approved', 'pending'], requireApplication: false, requireBackgroundCheck: false, customRequirements: ['Closed-toe shoes required', 'Able to lift 30 lbs'] },
-    tags: ['food', 'community', 'physical'],
-    createdAt: '2024-03-08',
-    updatedAt: '2024-03-08',
-  },
-];
+const MOCK_EVENTS: VolunteerEvent[] = [];
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -333,6 +275,11 @@ function ShiftRow({
   onUpdate: (s: Shift) => void;
   onDelete: () => void;
 }) {
+  const [showPerms, setShowPerms] = useState(false);
+
+  const updatePerm = (key: keyof ShiftPermissions, value: boolean) =>
+    onUpdate({ ...shift, permissions: { ...shift.permissions, [key]: value } });
+
   return (
     <div className="group border border-neutral-200 dark:border-neutral-700 rounded-lg p-4 bg-white dark:bg-neutral-800 space-y-3 hover:shadow-sm transition-shadow">
       <div className="flex items-center justify-between">
@@ -414,21 +361,163 @@ function ShiftRow({
           />
         </div>
       </div>
+
+      {/* Shift Permissions toggle */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowPerms(v => !v)}
+          className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+        >
+          <Lock className="w-3.5 h-3.5" />
+          Shift permissions
+          {showPerms ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        </button>
+
+        {showPerms && (
+          <div className="mt-2 p-3 bg-neutral-50 dark:bg-neutral-700/40 rounded-lg space-y-2 border border-neutral-200 dark:border-neutral-700">
+            {([
+              { key: 'allowSelfSignup', label: 'Allow volunteers to self-signup' },
+              { key: 'requireLeaderApproval', label: 'Require leader approval before confirming' },
+              { key: 'visibleToPublic', label: 'Visible on public volunteer portal' },
+              { key: 'allowWaitlist', label: 'Allow waitlist when at capacity' },
+            ] as { key: keyof ShiftPermissions; label: string }[]).map(({ key, label }) => (
+              <label key={key} className="flex items-center justify-between cursor-pointer">
+                <span className="text-xs text-neutral-700 dark:text-neutral-300">{label}</span>
+                <button
+                  type="button"
+                  onClick={() => updatePerm(key, !(shift.permissions[key] as boolean))}
+                  className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${
+                    (shift.permissions[key] as boolean) ? 'bg-primary-500' : 'bg-neutral-300 dark:bg-neutral-600'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${
+                    (shift.permissions[key] as boolean) ? 'translate-x-4' : ''
+                  }`} />
+                </button>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+// ─── API <-> Frontend adapter ─────────────────────────────────────────────────
+
+interface ApiEvent {
+  id: string;
+  title: string;
+  description?: string;
+  category?: string;
+  location?: string;
+  address?: string;
+  startDate?: string;
+  endDate?: string;
+  status: string;
+  visibility?: string;
+  maxVolunteers?: number;
+  spotsAvailable?: number;
+  tags?: string[];
+  coverImage?: string;
+  images?: string[];
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  notes?: string;
+  registrationDeadline?: string;
+  shifts?: Shift[];
+  eligibility?: EligibilitySettings;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+const API_TO_EVENT_STATUS: Record<string, EventStatus> = {
+  DRAFT: 'draft',
+  PUBLISHED: 'published',
+  UPCOMING: 'published',
+  ONGOING: 'published',
+  COMPLETED: 'completed',
+  CANCELLED: 'cancelled',
+};
+
+const EVENT_TO_API_STATUS: Record<EventStatus, string> = {
+  draft: 'DRAFT',
+  published: 'PUBLISHED',
+  cancelled: 'CANCELLED',
+  completed: 'COMPLETED',
+};
+
+function mapApiEvent(v: ApiEvent): VolunteerEvent {
+  const today = new Date().toISOString().split('T')[0];
+  return {
+    id: v.id,
+    title: v.title,
+    description: v.description ?? '',
+    category: (v.category?.toLowerCase() as EventCategory) ?? 'other',
+    coverImage: v.coverImage,
+    images: v.images ?? [],
+    location: v.location ?? '',
+    address: v.address,
+    startDate: v.startDate?.split('T')[0] ?? '',
+    endDate: v.endDate?.split('T')[0] ?? '',
+    status: API_TO_EVENT_STATUS[v.status] ?? 'draft',
+    visibility: (v.visibility?.toLowerCase() as 'public' | 'private') ?? 'public',
+    maxVolunteers: v.maxVolunteers ?? v.spotsAvailable,
+    registrationDeadline: v.registrationDeadline,
+    shifts: v.shifts ?? [],
+    eligibility: v.eligibility ?? { ...DEFAULT_ELIGIBILITY, customRequirements: [] },
+    tags: v.tags ?? [],
+    createdAt: v.createdAt ?? today,
+    updatedAt: v.updatedAt ?? today,
+    contactName: v.contactName,
+    contactEmail: v.contactEmail,
+    contactPhone: v.contactPhone,
+    notes: v.notes,
+  };
+}
+
+function toApiEvent(ev: VolunteerEvent): Record<string, unknown> {
+  return {
+    title: ev.title,
+    description: ev.description,
+    category: ev.category,
+    location: ev.location,
+    address: ev.address,
+    startDate: ev.startDate,
+    endDate: ev.endDate,
+    status: EVENT_TO_API_STATUS[ev.status] ?? 'DRAFT',
+    visibility: ev.visibility?.toUpperCase() ?? 'PUBLIC',
+    maxVolunteers: ev.maxVolunteers,
+    spotsAvailable: ev.maxVolunteers,
+    tags: ev.tags,
+    coverImage: ev.coverImage ?? '',
+    images: ev.images,
+    contactName: ev.contactName ?? '',
+    contactEmail: ev.contactEmail ?? '',
+    contactPhone: ev.contactPhone ?? '',
+    notes: ev.notes ?? '',
+    registrationDeadline: ev.registrationDeadline ?? '',
+    shifts: ev.shifts,
+    eligibility: ev.eligibility,
+  };
 }
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function Events() {
   const [view, setView] = useState<PageView>('list');
-  const [events, setEvents] = useState<VolunteerEvent[]>(MOCK_EVENTS);
+  const [events, setEvents] = useState<VolunteerEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [usingMockData, setUsingMockData] = useState(false);
   const [editingEvent, setEditingEvent] = useState<VolunteerEvent | null>(null);
   const [activeEvent, setActiveEvent] = useState<VolunteerEvent | null>(null);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [page, setPage] = useState(1);
   const [filterCategory, setFilterCategory] = useState<string>('all');
 
   // Image URL input
@@ -441,6 +530,27 @@ export default function Events() {
 
   // Custom requirement input
   const [requirementInput, setRequirementInput] = useState('');
+
+  // Fetch events from backend on mount; fall back to mock data if unreachable
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.get<ApiEvent[]>('/events?limit=100')
+      .then((data) => {
+        if (!cancelled) {
+          setEvents(data.map(mapApiEvent));
+          setUsingMockData(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEvents(MOCK_EVENTS);
+          setUsingMockData(true);
+        }
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Builder helpers ────────────────────────────────────────────────────
 
@@ -473,22 +583,52 @@ export default function Events() {
     setView('builder');
   };
 
-  const saveEvent = () => {
+  const saveEvent = async () => {
     if (!editingEvent) return;
     const updated = { ...editingEvent, updatedAt: new Date().toISOString().split('T')[0] };
-    setEvents((prev) => {
-      const idx = prev.findIndex((ev) => ev.id === updated.id);
-      return idx >= 0 ? prev.map((ev, i) => (i === idx ? updated : ev)) : [...prev, updated];
-    });
-    setEditingEvent(null);
-    setView('list');
+    const isNew = !events.some((ev) => ev.id === updated.id);
+
+    if (usingMockData) {
+      setEvents((prev) => {
+        const idx = prev.findIndex((ev) => ev.id === updated.id);
+        return idx >= 0 ? prev.map((ev, i) => (i === idx ? updated : ev)) : [...prev, updated];
+      });
+      setEditingEvent(null);
+      setView('list');
+      return;
+    }
+
+    try {
+      if (isNew) {
+        const created = await api.post<ApiEvent>('/events', toApiEvent(updated));
+        setEvents((prev) => [...prev, mapApiEvent(created)]);
+      } else {
+        const saved = await api.put<ApiEvent>(`/events/${updated.id}`, toApiEvent(updated));
+        setEvents((prev) => prev.map((ev) => (ev.id === updated.id ? mapApiEvent(saved) : ev)));
+      }
+      setEditingEvent(null);
+      setView('list');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Failed to save event';
+      import('react-hot-toast').then(({ default: toast }) => toast.error(msg));
+    }
   };
 
-  const deleteEvent = (id: string) => {
+  const deleteEvent = async (id: string) => {
+    if (!usingMockData) {
+      try {
+        await api.delete(`/events/${id}`);
+      } catch {
+        import('react-hot-toast').then(({ default: toast }) => toast.error('Failed to delete event'));
+        return;
+      }
+    }
     setEvents((prev) => prev.filter((ev) => ev.id !== id));
+    if (activeEvent?.id === id) setActiveEvent(null);
+    if (view === 'detail') setView('list');
   };
 
-  const duplicateEvent = (ev: VolunteerEvent) => {
+  const duplicateEvent = async (ev: VolunteerEvent) => {
     const dup: VolunteerEvent = {
       ...ev,
       id: generateId(),
@@ -501,7 +641,16 @@ export default function Events() {
       tags: [...ev.tags],
       images: [...ev.images],
     };
-    setEvents((prev) => [...prev, dup]);
+    if (usingMockData) {
+      setEvents((prev) => [...prev, dup]);
+      return;
+    }
+    try {
+      const created = await api.post<ApiEvent>('/events', toApiEvent(dup));
+      setEvents((prev) => [...prev, mapApiEvent(created)]);
+    } catch {
+      import('react-hot-toast').then(({ default: toast }) => toast.error('Failed to duplicate event'));
+    }
   };
 
   // Editing helpers — all use functional updater
@@ -527,6 +676,7 @@ export default function Events() {
         capacity: 10,
         signedUp: 0,
         role: 'Volunteer',
+        permissions: defaultShiftPermissions(),
       };
       return { ...prev, shifts: [...prev.shifts, newShift] };
     });
@@ -618,6 +768,8 @@ export default function Events() {
 
   // ── Filtering ──────────────────────────────────────────────────────────
 
+  const EVENT_PAGE_SIZE = 12;
+
   const filtered = events.filter((ev) => {
     const q = searchTerm.toLowerCase();
     const matchSearch = !q || ev.title.toLowerCase().includes(q) || ev.location.toLowerCase().includes(q) || ev.category.includes(q);
@@ -625,6 +777,13 @@ export default function Events() {
     const matchCat = filterCategory === 'all' || ev.category === filterCategory;
     return matchSearch && matchStatus && matchCat;
   });
+
+  const eventTotalPages = Math.max(1, Math.ceil(filtered.length / EVENT_PAGE_SIZE));
+  const eventSafePage = Math.min(page, eventTotalPages);
+  const paginatedEvents = filtered.slice((eventSafePage - 1) * EVENT_PAGE_SIZE, eventSafePage * EVENT_PAGE_SIZE);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [searchTerm, filterStatus, filterCategory]);
 
   const totalVolunteers = (ev: VolunteerEvent) => ev.shifts.reduce((sum, s) => sum + s.signedUp, 0);
   const totalCapacity = (ev: VolunteerEvent) => ev.shifts.reduce((sum, s) => sum + s.capacity, 0);
@@ -677,8 +836,30 @@ export default function Events() {
         </div>
       </Card>
 
+      {/* Offline banner */}
+      {usingMockData && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700 rounded-lg text-sm text-warning-700 dark:text-warning-400">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>Backend offline — showing demo data. Changes will not be saved.</span>
+        </div>
+      )}
+
       {/* Event Cards */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i} className="p-5 animate-pulse space-y-3">
+              <div className="h-4 bg-neutral-200 dark:bg-neutral-700 rounded w-3/4" />
+              <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-full" />
+              <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-5/6" />
+              <div className="flex gap-2 pt-2">
+                <div className="h-5 w-16 bg-neutral-200 dark:bg-neutral-700 rounded-full" />
+                <div className="h-5 w-20 bg-neutral-200 dark:bg-neutral-700 rounded-full" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         <Card className="p-12 text-center">
           <Calendar className="w-12 h-12 text-neutral-300 dark:text-neutral-600 mx-auto mb-3" />
           <p className="text-neutral-600 dark:text-neutral-400 mb-4">No events found</p>
@@ -689,7 +870,7 @@ export default function Events() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {filtered.map((ev) => {
+          {paginatedEvents.map((ev) => {
             const statusBadge = EVENT_STATUS_CONFIG[ev.status];
             const catMeta = CATEGORIES.find((c) => c.value === ev.category);
             const vol = totalVolunteers(ev);
@@ -807,6 +988,36 @@ export default function Events() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {!loading && filtered.length > EVENT_PAGE_SIZE && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            Showing {(eventSafePage - 1) * EVENT_PAGE_SIZE + 1}–{Math.min(eventSafePage * EVENT_PAGE_SIZE, filtered.length)} of {filtered.length} events
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={eventSafePage === 1}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-neutral-700 dark:text-neutral-300 px-2">
+              {eventSafePage} / {eventTotalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(eventTotalPages, p + 1))}
+              disabled={eventSafePage === eventTotalPages}
+            >
+              Next
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -1501,6 +1712,7 @@ export default function Events() {
 
   return (
     <Layout>
+      <Head><title>Events — VolunteerFlow</title></Head>
       <div className="space-y-6 max-w-6xl mx-auto">
         {view === 'list' && renderList()}
         {view === 'builder' && renderBuilder()}

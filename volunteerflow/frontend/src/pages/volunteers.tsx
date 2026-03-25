@@ -1,11 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import toast from 'react-hot-toast';
+import { api, ApiError } from '@/lib/api';
 import Layout from '@/components/Layout';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
+import { useRef } from 'react';
 import {
   Users,
   Search,
@@ -22,7 +25,13 @@ import {
   Clock,
   Eye,
   ChevronRight,
-  X
+  X,
+  Download,
+  AlertCircle,
+  ArrowRight,
+  RefreshCw,
+  Check,
+  FileText,
 } from 'lucide-react';
 
 // --- Types ---
@@ -68,6 +77,30 @@ interface CertificationEntry {
   note?: string;
 }
 
+/** Per-volunteer hour log entry */
+interface HourEntry {
+  id: string;
+  eventName: string;
+  date: string;
+  checkIn: string;
+  checkOut: string;
+  hours: number;
+  status: 'confirmed' | 'pending' | 'flagged';
+  notes?: string;
+}
+
+/** Badge issued to a volunteer */
+interface VolunteerBadge {
+  id: string;
+  badgeName: string;
+  badgeIcon: string;
+  badgeColor: string;
+  issuedAt: string;
+  issuedBy: string;
+  note?: string;
+  expiresAt?: string;
+}
+
 interface Volunteer {
   id: string;
   volunteerId: string;
@@ -86,7 +119,244 @@ interface Volunteer {
   events: EventParticipation[];
   checklist?: ChecklistItem[];
   certifications?: CertificationEntry[];
+  hours?: HourEntry[];
+  badges?: VolunteerBadge[];
+  completedTrainings?: { courseId: string; courseTitle: string; completedAt: string; }[];
 }
+
+// --- Import Wizard ---
+
+type ImportStep = 'upload' | 'map' | 'preview' | 'done';
+
+interface ColumnMapping { csvCol: string; field: string; }
+interface ParsedRow { [key: string]: string; }
+interface MappedVolunteer { name: string; email: string; phone: string; location: string; status: string; skills: string; [key: string]: string; }
+
+const VOLUNTEER_FIELDS = [
+  { key: 'name', label: 'Full Name', required: true },
+  { key: 'email', label: 'Email', required: true },
+  { key: 'phone', label: 'Phone', required: false },
+  { key: 'location', label: 'Location / City', required: false },
+  { key: 'status', label: 'Status (active/inactive)', required: false },
+  { key: 'skills', label: 'Skills (comma-separated)', required: false },
+  { key: 'joinDate', label: 'Join Date', required: false },
+  { key: '__skip', label: '— Skip this column —', required: false },
+];
+
+const SAMPLE_CSV = `First Name,Last Name,Email,Phone,City,Skills
+Jane,Smith,jane.smith@email.com,555-0101,New York,"Community Outreach, Fundraising"
+Carlos,Rivera,c.rivera@email.com,555-0102,Los Angeles,Event Planning
+Mia,Patel,mia.patel@email.com,555-0103,Chicago,"Teaching, Mentorship"`;
+
+function parseCsvData(text: string): { headers: string[]; rows: ParsedRow[] } {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
+  const rows = lines.slice(1).map((line) => {
+    const values: string[] = [];
+    let cur = ''; let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"') { inQ = !inQ; }
+      else if (line[i] === ',' && !inQ) { values.push(cur.trim()); cur = ''; }
+      else { cur += line[i]; }
+    }
+    values.push(cur.trim());
+    const row: ParsedRow = {};
+    headers.forEach((h, i) => { row[h] = values[i] ?? ''; });
+    return row;
+  });
+  return { headers, rows };
+}
+
+function autoMapCols(headers: string[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  headers.forEach((h) => {
+    const l = h.toLowerCase();
+    if (l.includes('first') && l.includes('name')) map[h] = '__first';
+    else if (l.includes('last') && l.includes('name')) map[h] = '__last';
+    else if (l === 'name' || l === 'full name' || l === 'fullname') map[h] = 'name';
+    else if (l.includes('email')) map[h] = 'email';
+    else if (l.includes('phone') || l.includes('mobile')) map[h] = 'phone';
+    else if (l.includes('city') || l.includes('location') || l.includes('address')) map[h] = 'location';
+    else if (l.includes('skill')) map[h] = 'skills';
+    else if (l.includes('status')) map[h] = 'status';
+    else map[h] = '__skip';
+  });
+  return map;
+}
+
+const inputCls = 'w-full px-3 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500';
+
+function ImportUploadStep({ onParsed }: { onParsed: (h: string[], r: ParsedRow[]) => void }) {
+  const [dragging, setDragging] = useState(false);
+  const [error, setError] = useState('');
+  const [tab, setTab] = useState<'file' | 'paste'>('file');
+  const [pasted, setPasted] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const process = (text: string) => {
+    const { headers, rows } = parseCsvData(text);
+    if (!headers.length || !rows.length) { setError('Could not parse CSV — ensure it has a header row and at least one data row.'); return; }
+    setError(''); onParsed(headers, rows);
+  };
+  const handleFile = (file: File) => {
+    if (!file.name.endsWith('.csv') && !file.name.endsWith('.txt')) { setError('Please upload a .csv file.'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => process(e.target?.result as string);
+    reader.readAsText(file);
+  };
+
+  return (
+    <div>
+      <div className="flex gap-1 mb-5 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-xl w-fit">
+        {(['file', 'paste'] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${tab === t ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm' : 'text-neutral-500 dark:text-neutral-400'}`}>
+            {t === 'file' ? 'Upload file' : 'Paste CSV'}
+          </button>
+        ))}
+      </div>
+      {tab === 'file' ? (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }}
+          onClick={() => inputRef.current?.click()}
+          className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${dragging ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/20' : 'border-neutral-200 dark:border-neutral-700 hover:border-primary-300 dark:hover:border-primary-700'}`}
+        >
+          <Upload className="w-8 h-8 mx-auto mb-2 text-neutral-300 dark:text-neutral-600" />
+          <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-1">Drop your CSV file here</p>
+          <p className="text-xs text-neutral-400">or click to browse</p>
+          <input ref={inputRef} type="file" accept=".csv,.txt" className="hidden" onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+        </div>
+      ) : (
+        <div>
+          <textarea value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder={SAMPLE_CSV} rows={7} className={inputCls + ' font-mono resize-none'} />
+          <Button onClick={() => process(pasted)} disabled={!pasted.trim()} className="mt-3 flex items-center gap-2">Parse data <ArrowRight className="w-4 h-4" /></Button>
+        </div>
+      )}
+      {error && <div className="mt-4 flex items-start gap-2 p-3 bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-lg text-sm text-danger-700 dark:text-danger-400"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />{error}</div>}
+      <div className="mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
+        <p className="text-xs text-neutral-400">Need a template?</p>
+        <button onClick={() => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([SAMPLE_CSV], { type: 'text/csv' })); a.download = 'volunteer-import-sample.csv'; a.click(); }} className="flex items-center gap-1.5 text-xs font-semibold text-primary-600 dark:text-primary-400 hover:underline">
+          <Download className="w-3.5 h-3.5" /> Download sample CSV
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ImportMapStep({ headers, rows, mapping, setMapping, onNext, onBack }: { headers: string[]; rows: ParsedRow[]; mapping: Record<string, string>; setMapping: (m: Record<string, string>) => void; onNext: () => void; onBack: () => void; }) {
+  const emailMapped = Object.values(mapping).includes('email');
+  const nameMapped = Object.values(mapping).includes('name') || Object.values(mapping).includes('__first');
+  const canProceed = emailMapped && nameMapped;
+  return (
+    <div>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-4">Match each column to a volunteer field. Auto-mapping applied where possible.</p>
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+        {headers.map((h) => (
+          <div key={h} className="grid grid-cols-2 gap-3 items-center p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl">
+            <div>
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{h}</p>
+              <p className="text-xs text-neutral-400 mt-0.5 font-mono truncate">{rows.slice(0, 2).map((r) => r[h]).filter(Boolean).join(', ')}</p>
+            </div>
+            <select value={mapping[h] ?? '__skip'} onChange={(e) => setMapping({ ...mapping, [h]: e.target.value })} className={inputCls}>
+              {VOLUNTEER_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>)}
+              <option value="__first">First Name (combine)</option>
+              <option value="__last">Last Name (combine)</option>
+            </select>
+          </div>
+        ))}
+      </div>
+      {!canProceed && <div className="mt-3 flex items-start gap-2 p-3 bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-800 rounded-lg text-sm text-warning-700 dark:text-warning-400"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />Map at least <strong className="mx-1">Name</strong> and <strong>Email</strong> to continue.</div>}
+      <div className="flex justify-between mt-5">
+        <Button variant="secondary" onClick={onBack}>Back</Button>
+        <Button onClick={onNext} disabled={!canProceed} className="flex items-center gap-2">Preview <ArrowRight className="w-4 h-4" /></Button>
+      </div>
+    </div>
+  );
+}
+
+function ImportPreviewStep({ rows, mapping, onImport, onBack, importing }: { rows: ParsedRow[]; mapping: Record<string, string>; onImport: (v: MappedVolunteer[]) => void; onBack: () => void; importing: boolean; }) {
+  const mapped: MappedVolunteer[] = rows.map((row) => {
+    const vol: MappedVolunteer = { name: '', email: '', phone: '', location: '', status: 'active', skills: '' };
+    let firstName = ''; let lastName = '';
+    Object.entries(mapping).forEach(([col, field]) => {
+      if (field === '__skip') return;
+      if (field === '__first') firstName = row[col] ?? '';
+      else if (field === '__last') lastName = row[col] ?? '';
+      else vol[field] = row[col] ?? '';
+    });
+    if (firstName || lastName) vol.name = `${firstName} ${lastName}`.trim();
+    return vol;
+  });
+  const valid = mapped.filter((v) => v.name && v.email);
+  const invalid = mapped.filter((v) => !v.name || !v.email);
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{valid.length} valid · {invalid.length} will be skipped (missing name or email)</p>
+        {invalid.length > 0 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400"><AlertCircle className="w-3 h-3" />{invalid.length} skipped</span>}
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-neutral-100 dark:border-neutral-800 max-h-64 overflow-y-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0">
+            <tr className="bg-neutral-50 dark:bg-neutral-800 border-b border-neutral-100 dark:border-neutral-800">
+              <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-neutral-400">Name</th>
+              <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-neutral-400">Email</th>
+              <th className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-neutral-400 hidden sm:table-cell">Location</th>
+              <th className="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-neutral-400">OK</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mapped.slice(0, 50).map((v, i) => {
+              const ok = !!(v.name && v.email);
+              return (
+                <tr key={i} className={`border-b border-neutral-50 dark:border-neutral-800/50 ${!ok ? 'opacity-40' : ''}`}>
+                  <td className="px-3 py-2 font-medium text-neutral-900 dark:text-neutral-100">{v.name || <span className="text-danger-400 italic text-xs">missing</span>}</td>
+                  <td className="px-3 py-2 text-neutral-600 dark:text-neutral-300 text-xs">{v.email || <span className="text-danger-400 italic">missing</span>}</td>
+                  <td className="px-3 py-2 text-neutral-500 dark:text-neutral-400 text-xs hidden sm:table-cell">{v.location || '—'}</td>
+                  <td className="px-3 py-2 text-center">
+                    {ok ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-success-100 dark:bg-success-900/30"><Check className="w-2.5 h-2.5 text-success-600 dark:text-success-400" /></span>
+                       : <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-danger-100 dark:bg-danger-900/30"><X className="w-2.5 h-2.5 text-danger-600 dark:text-danger-400" /></span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex justify-between mt-5">
+        <Button variant="secondary" onClick={onBack}>Back</Button>
+        <Button onClick={() => onImport(valid)} disabled={valid.length === 0 || importing} className="flex items-center gap-2">
+          {importing ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Importing…</> : <><Users className="w-4 h-4" />Import {valid.length} volunteer{valid.length !== 1 ? 's' : ''}</>}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ImportDoneStep({ count, onReset, onClose }: { count: number; onReset: () => void; onClose: () => void }) {
+  return (
+    <div className="text-center py-4">
+      <div className="w-16 h-16 rounded-full bg-success-100 dark:bg-success-900/30 flex items-center justify-center mx-auto mb-4">
+        <Check className="w-8 h-8 text-success-600 dark:text-success-400" />
+      </div>
+      <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100 mb-2">Import complete!</h3>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">{count} volunteer{count !== 1 ? 's' : ''} imported and added to your list.</p>
+      <div className="flex gap-3 justify-center">
+        <Button variant="secondary" onClick={onReset} className="flex items-center gap-2"><RefreshCw className="w-4 h-4" />Import more</Button>
+        <Button onClick={onClose} className="flex items-center gap-2"><Users className="w-4 h-4" />Done</Button>
+      </div>
+    </div>
+  );
+}
+
+const IMPORT_STEPS: { id: ImportStep; label: string }[] = [
+  { id: 'upload', label: 'Upload' },
+  { id: 'map', label: 'Map columns' },
+  { id: 'preview', label: 'Preview' },
+  { id: 'done', label: 'Done' },
+];
 
 // --- Org-Level Templates (customizable by the organization) ---
 
@@ -111,226 +381,99 @@ const defaultCertificationTemplates: CertificationTemplate[] = [
 
 // --- Mock Data ---
 
-const mockVolunteers: Volunteer[] = [
-  {
-    id: '1',
-    volunteerId: 'VOL-2024-001',
-    name: 'Alice Williams',
-    email: 'alice.w@email.com',
-    phone: '+1 (555) 123-4567',
-    location: 'New York, NY',
-    joinDate: '2023-01-15',
-    status: 'active',
-    eventsCompleted: 24,
-    hoursContributed: 156,
-    skills: ['Community Outreach', 'Event Planning', 'Fundraising'],
-    rating: 4.9,
-    avatar: 'https://i.pravatar.cc/150?img=1',
-    applicationId: 'APP-8821',
-    events: [
-      { id: 'e1', name: 'City Marathon Support', date: '2024-04-15', status: 'upcoming', role: 'Coordinator', hoursContributed: 0 },
-      { id: 'e2', name: 'Winter Food Drive', date: '2023-12-10', status: 'completed', role: 'Distributor', hoursContributed: 8 },
-      { id: 'e3', name: 'Park Cleanup Initiative', date: '2023-10-05', status: 'completed', role: 'Team Lead', hoursContributed: 6 },
-      { id: 'e4', name: 'School Supply Drive', date: '2023-09-12', status: 'completed', role: 'Organizer', hoursContributed: 5 }
-    ],
-    checklist: [
-      { id: 'c1', label: 'Background Check Completed', checked: true, createdDate: '2023-01-20' },
-      { id: 'c2', label: 'Orientation Attended', checked: true, createdDate: '2023-01-22' },
-      { id: 'c3', label: 'Safety Training', checked: false, createdDate: '2023-01-25' },
-      { id: 'c4', label: 'Uniform Received', checked: true, createdDate: '2023-02-01' }
-    ],
-    certifications: [
-      { templateId: 'cert_1', granted: true, grantedAt: '2023-03-10' },
-      { templateId: 'cert_2', granted: true, grantedAt: '2023-04-05' },
-      { templateId: 'cert_3', granted: true, grantedAt: '2023-03-15' },
-      { templateId: 'cert_4', granted: false },
-      { templateId: 'cert_5', granted: true, grantedAt: '2023-08-20' },
-      { templateId: 'cert_6', granted: true, grantedAt: '2023-06-01' },
-      { templateId: 'cert_7', granted: false },
-    ]
-  },
-  {
-    id: '2',
-    volunteerId: 'VOL-2024-002',
-    name: 'Bob Anderson',
-    email: 'bob.a@email.com',
-    phone: '+1 (555) 234-5678',
-    location: 'Los Angeles, CA',
-    joinDate: '2023-02-20',
-    status: 'active',
-    eventsCompleted: 21,
-    hoursContributed: 142,
-    skills: ['Healthcare', 'Senior Care', 'First Aid'],
-    rating: 4.8,
-    avatar: 'https://i.pravatar.cc/150?img=12',
-    applicationId: 'APP-8845',
-    events: [
-      { id: 'e4', name: 'Blood Donation Camp', date: '2024-03-20', status: 'ongoing', role: 'Nurse Assistant', hoursContributed: 0 },
-      { id: 'e5', name: 'Senior Home Visit', date: '2024-02-14', status: 'completed', role: 'Companion', hoursContributed: 4 },
-      { id: 'e6', name: 'Health Awareness Drive', date: '2024-01-10', status: 'completed', role: 'Volunteer', hoursContributed: 6 }
-    ],
-    checklist: [
-      { id: 'c5', label: 'Medical Clearance', checked: true, createdDate: '2023-02-22' },
-      { id: 'c6', label: 'First Aid Certification', checked: true, createdDate: '2023-02-25' },
-      { id: 'c7', label: 'CPR Training', checked: true, createdDate: '2023-03-01' }
-    ],
-    certifications: [
-      { templateId: 'cert_1', granted: false },
-      { templateId: 'cert_4', granted: true, grantedAt: '2023-03-10' },
-      { templateId: 'cert_7', granted: true, grantedAt: '2023-04-01' },
-    ]
-  },
-  {
-    id: '3',
-    volunteerId: 'VOL-2024-003',
-    name: 'Carol Martinez',
-    email: 'carol.m@email.com',
-    phone: '+1 (555) 345-6789',
-    location: 'Chicago, IL',
-    joinDate: '2023-03-10',
-    status: 'active',
-    eventsCompleted: 18,
-    hoursContributed: 128,
-    skills: ['Education', 'Tutoring', 'Youth Mentorship'],
-    rating: 4.7,
-    avatar: 'https://i.pravatar.cc/150?img=5',
-    events: [
-      { id: 'e6', name: 'After School Program', date: '2024-01-15', status: 'completed', role: 'Tutor', hoursContributed: 10 },
-      { id: 'e7', name: 'Summer Reading Camp', date: '2023-07-20', status: 'completed', role: 'Lead Teacher', hoursContributed: 20 }
-    ],
-    checklist: [
-      { id: 'c8', label: 'Teaching Certificate Verified', checked: true, createdDate: '2023-03-12' },
-      { id: 'c9', label: 'Child Safety Training', checked: true, createdDate: '2023-03-15' }
-    ]
-  },
-  {
-    id: '4',
-    volunteerId: 'VOL-2024-004',
-    name: 'Daniel Lee',
-    email: 'daniel.l@email.com',
-    phone: '+1 (555) 456-7890',
-    location: 'Houston, TX',
-    joinDate: '2023-04-05',
-    status: 'active',
-    eventsCompleted: 15,
-    hoursContributed: 98,
-    skills: ['Environmental', 'Conservation', 'Sustainability'],
-    rating: 4.6,
-    avatar: 'https://i.pravatar.cc/150?img=13',
-    applicationId: 'APP-9012',
-    events: [
-      { id: 'e8', name: 'Tree Planting Drive', date: '2024-03-25', status: 'upcoming', role: 'Coordinator', hoursContributed: 0 },
-      { id: 'e9', name: 'Beach Cleanup', date: '2024-02-05', status: 'completed', role: 'Volunteer', hoursContributed: 5 }
-    ],
-    checklist: [
-      { id: 'c10', label: 'Environmental Safety Training', checked: true, createdDate: '2023-04-10' },
-      { id: 'c11', label: 'Equipment Training', checked: false, createdDate: '2023-04-12' }
-    ]
-  },
-  {
-    id: '5',
-    volunteerId: 'VOL-2024-005',
-    name: 'Emma Thompson',
-    email: 'emma.t@email.com',
-    phone: '+1 (555) 567-8901',
-    location: 'Phoenix, AZ',
-    joinDate: '2023-05-12',
-    status: 'inactive',
-    eventsCompleted: 12,
-    hoursContributed: 84,
-    skills: ['Food Services', 'Kitchen Help', 'Distribution'],
-    rating: 4.5,
-    avatar: 'https://i.pravatar.cc/150?img=9',
-    applicationId: 'APP-9134',
-    events: [
-      { id: 'e10', name: 'Community Kitchen', date: '2023-11-30', status: 'completed', role: 'Kitchen Staff', hoursContributed: 8 }
-    ],
-    checklist: [
-      { id: 'c12', label: 'Food Handler Certification', checked: true, createdDate: '2023-05-15' },
-      { id: 'c13', label: 'Kitchen Safety Training', checked: true, createdDate: '2023-05-18' }
-    ]
-  },
-  {
-    id: '6',
-    volunteerId: 'VOL-2024-006',
-    name: 'Frank Wilson',
-    email: 'frank.w@email.com',
-    phone: '+1 (555) 678-9012',
-    location: 'Philadelphia, PA',
-    joinDate: '2024-03-08',
-    status: 'pending',
-    eventsCompleted: 0,
-    hoursContributed: 0,
-    skills: ['Technology', 'IT Support', 'Digital Marketing'],
-    rating: 0,
-    applicationId: 'APP-9245',
-    events: [],
-    checklist: [
-      { id: 'c14', label: 'Background Check', checked: false, createdDate: '2024-03-09' },
-      { id: 'c15', label: 'Orientation Scheduled', checked: false, createdDate: '2024-03-09' }
-    ]
-  },
-  {
-    id: '7',
-    volunteerId: 'VOL-2024-007',
-    name: 'Grace Kim',
-    email: 'grace.k@email.com',
-    phone: '+1 (555) 789-0123',
-    location: 'San Antonio, TX',
-    joinDate: '2023-07-22',
-    status: 'active',
-    eventsCompleted: 9,
-    hoursContributed: 67,
-    skills: ['Arts & Crafts', 'Creative Activities', 'Children Programs'],
-    rating: 4.4,
-    avatar: 'https://i.pravatar.cc/150?img=20',
-    events: [
-      { id: 'e11', name: 'Kids Art Workshop', date: '2024-02-28', status: 'completed', role: 'Instructor', hoursContributed: 6 }
-    ],
-    checklist: [
-      { id: 'c16', label: 'Child Working with Children Check', checked: true, createdDate: '2023-07-25' },
-      { id: 'c17', label: 'Art Supplies Training', checked: true, createdDate: '2023-07-28' }
-    ]
-  },
-  {
-    id: '8',
-    volunteerId: 'VOL-2024-008',
-    name: 'Henry Davis',
-    email: 'henry.d@email.com',
-    phone: '+1 (555) 890-1234',
-    location: 'San Diego, CA',
-    joinDate: '2023-08-30',
-    status: 'active',
-    eventsCompleted: 7,
-    hoursContributed: 52,
-    skills: ['Construction', 'Home Repair', 'Manual Labor'],
-    rating: 4.3,
-    avatar: 'https://i.pravatar.cc/150?img=15',
-    applicationId: 'APP-9356',
-    events: [
-      { id: 'e12', name: 'Habitat for Humanity', date: '2024-01-20', status: 'completed', role: 'Builder', hoursContributed: 12 }
-    ],
-    checklist: [
-      { id: 'c18', label: 'Safety Equipment Issued', checked: true, createdDate: '2023-09-01' },
-      { id: 'c19', label: 'Construction Safety Training', checked: true, createdDate: '2023-09-05' },
-      { id: 'c20', label: 'Tool Operation Certification', checked: false, createdDate: '2023-09-08' }
-    ]
-  }
-];
+const mockVolunteers: Volunteer[] = [];
 
 // Export for use in detail page
 export { mockVolunteers, defaultChecklistTemplates, defaultCertificationTemplates };
-export type { Volunteer, EventParticipation, ChecklistItem, ChecklistTemplate, CertificationTemplate, CertificationEntry };
+export type { Volunteer, EventParticipation, ChecklistItem, ChecklistTemplate, CertificationTemplate, CertificationEntry, HourEntry, VolunteerBadge };
+export { mockVolunteers as mutableMockVolunteers };
+
+// ─── API <-> Frontend adapter ──────────────────────────────────────────────────
+
+interface ApiVolunteer {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  skills?: string[];
+  hoursContributed?: number;
+  status: string;
+}
+
+function mapApiVolunteer(v: ApiVolunteer): Volunteer {
+  const statusRaw = v.status?.toLowerCase();
+  const status: Volunteer['status'] =
+    statusRaw === 'inactive' ? 'inactive' : statusRaw === 'pending' ? 'pending' : 'active';
+  return {
+    id: v.id,
+    volunteerId: `VOL-${v.id}`,
+    name: `${v.firstName} ${v.lastName}`.trim(),
+    email: v.email,
+    phone: v.phone ?? '',
+    location: '',
+    joinDate: new Date().toISOString().split('T')[0],
+    status,
+    eventsCompleted: 0,
+    hoursContributed: v.hoursContributed ?? 0,
+    skills: v.skills ?? [],
+    rating: 0,
+    events: [],
+    checklist: [],
+  };
+}
 
 export default function Volunteers() {
-  const router = useRouter();
-  const [volunteers, setVolunteers] = useState<Volunteer[]>(mockVolunteers);
+  const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [usingMockData, setUsingMockData] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<string>('');
 
+  // Import wizard state
+  const [showImport, setShowImport] = useState(false);
+  const [importStep, setImportStep] = useState<ImportStep>('upload');
+  const [importHeaders, setImportHeaders] = useState<string[]>([]);
+  const [importRows, setImportRows] = useState<ParsedRow[]>([]);
+  const [importMapping, setImportMapping] = useState<Record<string, string>>({});
+  const [importedCount, setImportedCount] = useState(0);
+  const [importing, setImporting] = useState(false);
+
+  const openImport = () => { setImportStep('upload'); setImportHeaders([]); setImportRows([]); setImportMapping({}); setImportedCount(0); setShowImport(true); };
+  const closeImport = () => setShowImport(false);
+
+  const handleImportParsed = (h: string[], r: ParsedRow[]) => { setImportHeaders(h); setImportRows(r); setImportMapping(autoMapCols(h)); setImportStep('map'); };
+  const handleImportConfirm = (vols: MappedVolunteer[]) => {
+    setImporting(true);
+    setTimeout(() => {
+      const newVols: Volunteer[] = vols.map((v, i) => ({
+        id: `import_${Date.now()}_${i}`,
+        volunteerId: `VOL-${new Date().getFullYear()}-${String(volunteers.length + i + 1).padStart(3, '0')}`,
+        name: v.name,
+        email: v.email,
+        phone: v.phone || '',
+        location: v.location || '',
+        joinDate: new Date().toISOString().split('T')[0],
+        status: (v.status === 'inactive' ? 'inactive' : v.status === 'pending' ? 'pending' : 'active') as 'active' | 'inactive' | 'pending',
+        eventsCompleted: 0,
+        hoursContributed: 0,
+        skills: v.skills ? v.skills.split(',').map((s) => s.trim()).filter(Boolean) : [],
+        rating: 0,
+        events: [],
+        checklist: [],
+      }));
+      setVolunteers((prev) => [...newVols, ...prev]);
+      setImportedCount(vols.length);
+      setImporting(false);
+      setImportStep('done');
+    }, 1200);
+  };
+
   // Form state
+  const [formErrors, setFormErrors] = useState<{ name?: string; email?: string }>({});
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -340,6 +483,32 @@ export default function Volunteers() {
     status: 'active' as 'active' | 'inactive' | 'pending',
     avatar: ''
   });
+
+  // Fetch volunteers from backend on mount; fall back to mock data if unreachable
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.get<ApiVolunteer[]>('/volunteers?limit=100')
+      .then((data) => {
+        if (!cancelled) {
+          setVolunteers(data.map(mapApiVolunteer));
+          setUsingMockData(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVolunteers(mockVolunteers);
+          setUsingMockData(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Reset to page 1 when search/filter changes
+  useEffect(() => { setPage(1); }, [searchTerm, statusFilter]);
 
   useEffect(() => {
     if (showModal) {
@@ -370,19 +539,25 @@ export default function Volunteers() {
     }
   };
 
+  const PAGE_SIZE = 12;
+
   // Filter volunteers
   const filteredVolunteers = volunteers.filter(volunteer => {
-    const matchesSearch = 
+    const matchesSearch =
       volunteer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       volunteer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       volunteer.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
       volunteer.volunteerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       volunteer.skills.some(skill => skill.toLowerCase().includes(searchTerm.toLowerCase()));
-    
+
     const matchesStatus = statusFilter === 'all' || volunteer.status === statusFilter;
-    
+
     return matchesSearch && matchesStatus;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredVolunteers.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginatedVolunteers = filteredVolunteers.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   // Calculate stats
   const stats = {
@@ -418,40 +593,114 @@ export default function Volunteers() {
       avatar: ''
     });
     setAvatarPreview('');
+    setFormErrors({});
     setShowModal(true);
   };
 
   // Handle delete volunteer
   const handleDeleteVolunteer = (id: string) => {
-    if (confirm('Are you sure you want to delete this volunteer?')) {
-      setVolunteers(prev => prev.filter(v => v.id !== id));
-    }
+    const target = volunteers.find(v => v.id === id);
+    if (!target) return;
+    toast((t) => (
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">Delete <strong>{target.name}</strong>?</p>
+        <p className="text-xs text-neutral-500">This action cannot be undone.</p>
+        <div className="flex gap-2 mt-1">
+          <button
+            onClick={async () => {
+              toast.dismiss(t.id);
+              try {
+                if (!usingMockData) await api.delete(`/volunteers/${id}`);
+                setVolunteers(prev => prev.filter(v => v.id !== id));
+                toast.success('Volunteer deleted');
+              } catch {
+                toast.error('Failed to delete volunteer');
+              }
+            }}
+            className="px-3 py-1.5 bg-danger-600 hover:bg-danger-700 text-white text-xs font-medium rounded-md transition-colors"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => toast.dismiss(t.id)}
+            className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-medium rounded-md transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    ), { duration: 8000 });
   };
 
   // Handle form submit
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const newId = `VOL-${new Date().getFullYear()}-${String(volunteers.length + 1).padStart(3, '0')}`;
-    const newVolunteer: Volunteer = {
-      id: Date.now().toString(),
-      volunteerId: newId,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      location: formData.location,
-      joinDate: new Date().toISOString().split('T')[0],
-      status: formData.status,
-      eventsCompleted: 0,
-      hoursContributed: 0,
-      skills: formData.skills.split(',').map(s => s.trim()).filter(Boolean),
-      rating: 0,
-      avatar: formData.avatar,
-      events: [],
-      checklist: []
-    };
-    setVolunteers(prev => [newVolunteer, ...prev]);
-    setShowModal(false);
+
+    // Validate before API call
+    const errors: { name?: string; email?: string } = {};
+    if (!formData.name.trim()) {
+      errors.name = 'Name is required.';
+    } else if (formData.name.trim().split(/\s+/).length < 2) {
+      errors.name = 'Please enter a first and last name.';
+    }
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!formData.email.trim()) {
+      errors.email = 'Email is required.';
+    } else if (!emailRe.test(formData.email.trim())) {
+      errors.email = 'Enter a valid email address.';
+    }
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+    setFormErrors({});
+
+    const nameParts = formData.name.trim().split(/\s+/);
+    const firstName = nameParts[0] ?? '';
+    const lastName = nameParts.slice(1).join(' ') || '-';
+    const skills = formData.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const statusUpper = formData.status.toUpperCase();
+
+    if (usingMockData) {
+      // Offline: add locally only
+      const newVolunteer: Volunteer = {
+        id: Date.now().toString(),
+        volunteerId: `VOL-${new Date().getFullYear()}-${String(volunteers.length + 1).padStart(3, '0')}`,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        location: formData.location,
+        joinDate: new Date().toISOString().split('T')[0],
+        status: formData.status,
+        eventsCompleted: 0,
+        hoursContributed: 0,
+        skills,
+        rating: 0,
+        avatar: formData.avatar,
+        events: [],
+        checklist: [],
+      };
+      setVolunteers(prev => [newVolunteer, ...prev]);
+      setShowModal(false);
+      return;
+    }
+
+    try {
+      const created = await api.post<ApiVolunteer>('/volunteers', {
+        firstName,
+        lastName,
+        email: formData.email,
+        phone: formData.phone,
+        skills,
+        status: statusUpper,
+      });
+      setVolunteers(prev => [{ ...mapApiVolunteer(created), location: formData.location, avatar: formData.avatar }, ...prev]);
+      setShowModal(false);
+      toast.success('Volunteer added');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Failed to add volunteer';
+      toast.error(msg);
+    }
   };
 
   // Get initials from name
@@ -461,6 +710,9 @@ export default function Volunteers() {
 
   return (
     <Layout>
+      <Head>
+        <title>Volunteers — VolunteerFlow</title>
+      </Head>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -470,11 +722,25 @@ export default function Volunteers() {
               Manage your volunteer community
             </p>
           </div>
-          <Button onClick={handleAddVolunteer}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Volunteer
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={openImport}>
+              <Upload className="w-4 h-4 mr-2" />
+              Import CSV
+            </Button>
+            <Button onClick={handleAddVolunteer}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Volunteer
+            </Button>
+          </div>
         </div>
+
+        {/* Offline/mock data banner */}
+        {usingMockData && (
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700 rounded-lg text-sm text-warning-700 dark:text-warning-400">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>Backend offline — showing demo data. Changes will not be saved.</span>
+          </div>
+        )}
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -568,7 +834,25 @@ export default function Volunteers() {
         </Card>
 
         {/* Volunteers Grid */}
-        {filteredVolunteers.length === 0 ? (
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Card key={i} className="p-6 animate-pulse">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-12 h-12 rounded-full bg-neutral-200 dark:bg-neutral-700" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3.5 bg-neutral-200 dark:bg-neutral-700 rounded w-3/4" />
+                    <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded" />
+                  <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-5/6" />
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : filteredVolunteers.length === 0 ? (
           <Card className="p-12 text-center">
             <Users className="w-16 h-16 text-neutral-400 dark:text-neutral-600 mx-auto mb-4" />
             <p className="text-lg text-neutral-600 dark:text-neutral-400 mb-2">No volunteers found</p>
@@ -582,7 +866,7 @@ export default function Volunteers() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredVolunteers.map((volunteer) => (
+            {paginatedVolunteers.map((volunteer) => (
               <Card key={volunteer.id} className="p-6 hover:shadow-lg transition-shadow group">
                 
                 {/* Header: ID & Delete */}
@@ -672,6 +956,36 @@ export default function Volunteers() {
             ))}
           </div>
         )}
+
+        {/* Pagination */}
+        {!loading && filteredVolunteers.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+              Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredVolunteers.length)} of {filteredVolunteers.length} volunteers
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={safePage === 1}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-neutral-700 dark:text-neutral-300 px-2">
+                {safePage} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage === totalPages}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Add Modal */}
@@ -739,10 +1053,11 @@ export default function Volunteers() {
                       type="text"
                       required
                       value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-transparent transition-colors"
+                      onChange={(e) => { setFormData({ ...formData, name: e.target.value }); setFormErrors((prev) => ({ ...prev, name: undefined })); }}
+                      className={`w-full px-4 py-2 border ${formErrors.name ? 'border-danger-500 dark:border-danger-400' : 'border-neutral-300 dark:border-neutral-600'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-transparent transition-colors`}
                       placeholder="John Doe"
                     />
+                    {formErrors.name && <p className="mt-1 text-xs text-danger-600 dark:text-danger-400">{formErrors.name}</p>}
                   </div>
 
                   <div>
@@ -753,10 +1068,11 @@ export default function Volunteers() {
                       type="email"
                       required
                       value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-transparent transition-colors"
+                      onChange={(e) => { setFormData({ ...formData, email: e.target.value }); setFormErrors((prev) => ({ ...prev, email: undefined })); }}
+                      className={`w-full px-4 py-2 border ${formErrors.email ? 'border-danger-500 dark:border-danger-400' : 'border-neutral-300 dark:border-neutral-600'} bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-transparent transition-colors`}
                       placeholder="john@email.com"
                     />
+                    {formErrors.email && <p className="mt-1 text-xs text-danger-600 dark:text-danger-400">{formErrors.email}</p>}
                   </div>
 
                   <div>
@@ -829,6 +1145,60 @@ export default function Volunteers() {
                   </Button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center p-4 z-[9999]" onClick={(e) => { if (e.target === e.currentTarget) closeImport(); }}>
+          <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-neutral-200 dark:border-neutral-700" onClick={(e) => e.stopPropagation()}>
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-neutral-700">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                  <FileText className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">Import Volunteers</h2>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">Bulk import from a CSV file</p>
+                </div>
+              </div>
+              <button onClick={closeImport} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors">
+                <X className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+
+            {/* Progress stepper */}
+            {importStep !== 'done' && (
+              <div className="flex items-center gap-2 px-6 py-3 border-b border-neutral-100 dark:border-neutral-700">
+                {IMPORT_STEPS.filter(s => s.id !== 'done').map((s, i, arr) => {
+                  const stepIdx = IMPORT_STEPS.findIndex(x => x.id === importStep);
+                  const thisIdx = IMPORT_STEPS.findIndex(x => x.id === s.id);
+                  const done = thisIdx < stepIdx;
+                  const active = s.id === importStep;
+                  return (
+                    <div key={s.id} className="flex items-center gap-2 flex-1">
+                      <div className={`flex items-center gap-2 ${active ? 'text-primary-600 dark:text-primary-400' : done ? 'text-success-600 dark:text-success-400' : 'text-neutral-400'}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${active ? 'bg-primary-600 text-white' : done ? 'bg-success-500 text-white' : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-500'}`}>
+                          {done ? <Check className="w-3.5 h-3.5" /> : i + 1}
+                        </div>
+                        <span className="text-xs font-medium hidden sm:block">{s.label}</span>
+                      </div>
+                      {i < arr.length - 1 && <div className={`flex-1 h-px ${done ? 'bg-success-400' : 'bg-neutral-200 dark:bg-neutral-700'}`} />}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Step content */}
+            <div className="p-6">
+              {importStep === 'upload'  && <ImportUploadStep onParsed={handleImportParsed} />}
+              {importStep === 'map'     && <ImportMapStep headers={importHeaders} rows={importRows} mapping={importMapping} setMapping={setImportMapping} onNext={() => setImportStep('preview')} onBack={() => setImportStep('upload')} />}
+              {importStep === 'preview' && <ImportPreviewStep rows={importRows} mapping={importMapping} onImport={handleImportConfirm} onBack={() => setImportStep('map')} importing={importing} />}
+              {importStep === 'done'    && <ImportDoneStep count={importedCount} onReset={() => setImportStep('upload')} onClose={closeImport} />}
             </div>
           </div>
         </div>

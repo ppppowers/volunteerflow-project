@@ -10,12 +10,14 @@ import {
   ArrowLeft, Edit, Save, X, Mail, Phone, MapPin, Calendar, Star, Upload,
   Hash, Clock, History, FileText, ExternalLink, TrendingUp, Award, Target,
   Users, Briefcase, CheckSquare, Square, Plus, Trash2, CheckCircle2,
-  Settings, Shield, BadgeCheck,
+  Settings, Shield, BadgeCheck, AlarmCheck, CheckCircle, AlertTriangle,
+  GraduationCap,
 } from 'lucide-react';
 import {
   mockVolunteers, defaultChecklistTemplates, defaultCertificationTemplates,
   type Volunteer, type EventParticipation, type ChecklistItem,
   type ChecklistTemplate, type CertificationTemplate, type CertificationEntry,
+  type HourEntry, type VolunteerBadge,
 } from '../volunteers';
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
@@ -27,6 +29,7 @@ export default function VolunteerDetail() {
 
   const [volunteer, setVolunteer] = useState<Volunteer | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [rightTab, setRightTab] = useState<'overview' | 'hours' | 'badges' | 'training'>('overview');
   const [avatarPreview, setAvatarPreview] = useState('');
   const [showChecklistInput, setShowChecklistInput] = useState(false);
   const [newChecklistItem, setNewChecklistItem] = useState('');
@@ -415,9 +418,51 @@ export default function VolunteerDetail() {
             {/* Summary Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card className="p-5"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-success-100 dark:bg-success-900/30 rounded-lg flex items-center justify-center"><Award className="w-6 h-6 text-success-600 dark:text-success-400" /></div><div><p className="text-sm text-neutral-600 dark:text-neutral-400">Events</p><p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{volunteer.eventsCompleted}</p></div></div></Card>
-              <Card className="p-5"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-lg flex items-center justify-center"><Briefcase className="w-6 h-6 text-primary-600 dark:text-primary-400" /></div><div><p className="text-sm text-neutral-600 dark:text-neutral-400">Hours</p><p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{volunteer.hoursContributed}</p></div></div></Card>
-              <Card className="p-5"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-warning-100 dark:bg-warning-900/30 rounded-lg flex items-center justify-center"><BadgeCheck className="w-6 h-6 text-warning-600 dark:text-warning-400" /></div><div><p className="text-sm text-neutral-600 dark:text-neutral-400">Certifications</p><p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{certStats.granted} / {certStats.total}</p></div></div></Card>
+              <button className="text-left" onClick={() => setRightTab('hours')}><Card className="p-5 hover:ring-2 hover:ring-primary-300 dark:hover:ring-primary-700 transition-all"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-lg flex items-center justify-center"><Clock className="w-6 h-6 text-primary-600 dark:text-primary-400" /></div><div><p className="text-sm text-neutral-600 dark:text-neutral-400">Hours</p><p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{volunteer.hoursContributed}</p></div></div></Card></button>
+              <button className="text-left" onClick={() => setRightTab('badges')}><Card className="p-5 hover:ring-2 hover:ring-warning-300 dark:hover:ring-warning-700 transition-all"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-warning-100 dark:bg-warning-900/30 rounded-lg flex items-center justify-center"><BadgeCheck className="w-6 h-6 text-warning-600 dark:text-warning-400" /></div><div><p className="text-sm text-neutral-600 dark:text-neutral-400">Badges</p><p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{(volunteer.badges ?? []).length}</p></div></div></Card></button>
+              <button className="text-left" onClick={() => setRightTab('training')}><Card className="p-5 hover:ring-2 hover:ring-success-300 dark:hover:ring-success-700 transition-all"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-success-100 dark:bg-success-900/30 rounded-lg flex items-center justify-center"><GraduationCap className="w-6 h-6 text-success-600 dark:text-success-400" /></div><div><p className="text-sm text-neutral-600 dark:text-neutral-400">Training</p><p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{(volunteer.completedTrainings ?? []).length}</p></div></div></Card></button>
             </div>
+
+            {/* Tab bar */}
+            <div className="flex gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl p-1 w-fit">
+              {([
+                { id: 'overview',  label: 'Overview',  icon: Target },
+                { id: 'hours',     label: 'Hours',     icon: Clock },
+                { id: 'badges',    label: 'Badges',    icon: BadgeCheck },
+                { id: 'training',  label: 'Training',  icon: GraduationCap },
+              ] as { id: typeof rightTab; label: string; icon: React.ComponentType<{ className?: string }> }[]).map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setRightTab(id)}
+                  className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    rightTab === id
+                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                  {id === 'hours' && (volunteer.hours ?? []).length > 0 && (
+                    <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-1.5 py-0.5 rounded-full">
+                      {(volunteer.hours ?? []).length}
+                    </span>
+                  )}
+                  {id === 'badges' && (volunteer.badges ?? []).length > 0 && (
+                    <span className="text-[10px] font-bold bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-300 px-1.5 py-0.5 rounded-full">
+                      {(volunteer.badges ?? []).length}
+                    </span>
+                  )}
+                  {id === 'training' && (volunteer.completedTrainings ?? []).length > 0 && (
+                    <span className="text-[10px] font-bold bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-300 px-1.5 py-0.5 rounded-full">
+                      {(volunteer.completedTrainings ?? []).length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* ── OVERVIEW TAB ─────────────────────────────────────────── */}
+            {rightTab === 'overview' && <>
 
             {/* Certifications */}
             <Card className="p-6">
@@ -581,6 +626,213 @@ export default function VolunteerDetail() {
                 </div>
               ) : (<p className="text-center text-neutral-500 dark:text-neutral-400 italic py-8">No completed events yet</p>)}
             </Card>
+
+            </>}
+
+            {/* ── HOURS TAB ────────────────────────────────────────────── */}
+            {rightTab === 'hours' && (
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <Clock className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                    <div>
+                      <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Hours Log</h3>
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                        {volunteer.hoursContributed} total hours across {(volunteer.hours ?? []).length} sessions
+                      </p>
+                    </div>
+                  </div>
+                  {/* Confirmed / pending / flagged summary */}
+                  <div className="flex items-center gap-3 text-xs">
+                    {(['confirmed', 'pending', 'flagged'] as HourEntry['status'][]).map(s => {
+                      const count = (volunteer.hours ?? []).filter(h => h.status === s).length;
+                      if (!count) return null;
+                      const cfg = {
+                        confirmed: 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300',
+                        pending:   'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300',
+                        flagged:   'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
+                      }[s];
+                      return (
+                        <span key={s} className={`px-2 py-0.5 rounded-full font-semibold capitalize ${cfg}`}>
+                          {count} {s}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {(volunteer.hours ?? []).length === 0 ? (
+                  <div className="text-center py-12 text-neutral-400">
+                    <Clock className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No hours logged for this volunteer yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Summary bar */}
+                    <div className="grid grid-cols-3 gap-3 mb-2">
+                      {[
+                        { label: 'Total Hours', value: volunteer.hoursContributed, color: 'text-primary-600 dark:text-primary-400' },
+                        { label: 'Confirmed', value: (volunteer.hours ?? []).filter(h => h.status === 'confirmed').reduce((s, h) => s + h.hours, 0), color: 'text-success-600 dark:text-success-400' },
+                        { label: 'Pending', value: (volunteer.hours ?? []).filter(h => h.status === 'pending').reduce((s, h) => s + h.hours, 0), color: 'text-warning-600 dark:text-warning-400' },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="bg-neutral-50 dark:bg-neutral-800/50 rounded-lg p-3 text-center">
+                          <p className={`text-xl font-bold ${color}`}>{value}</p>
+                          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{label}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Hour entries */}
+                    {(volunteer.hours ?? []).map((entry: HourEntry) => {
+                      const statusCfg = {
+                        confirmed: { icon: CheckCircle,     color: 'text-success-600 dark:text-success-400', bg: 'bg-success-50 dark:bg-success-900/20 border-success-200 dark:border-success-800' },
+                        pending:   { icon: AlarmCheck,      color: 'text-warning-600 dark:text-warning-400', bg: 'bg-warning-50 dark:bg-warning-900/20 border-warning-200 dark:border-warning-800' },
+                        flagged:   { icon: AlertTriangle,   color: 'text-danger-600 dark:text-danger-400',   bg: 'bg-danger-50 dark:bg-danger-900/20 border-danger-200 dark:border-danger-800' },
+                      }[entry.status];
+                      const StatusIcon = statusCfg.icon;
+                      return (
+                        <div key={entry.id} className={`flex items-start gap-4 p-4 border rounded-lg ${statusCfg.bg}`}>
+                          <StatusIcon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${statusCfg.color}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{entry.eventName}</h4>
+                              <span className="text-sm font-bold text-neutral-900 dark:text-neutral-100 flex-shrink-0 ml-2">
+                                {entry.hours}h
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                              <span>{new Date(entry.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              <span>·</span>
+                              <span>{entry.checkIn} – {entry.checkOut}</span>
+                              <span className={`capitalize font-semibold ${statusCfg.color}`}>{entry.status}</span>
+                            </div>
+                            {entry.notes && (
+                              <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400 italic">{entry.notes}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {/* ── BADGES TAB ───────────────────────────────────────────── */}
+            {rightTab === 'badges' && (
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <BadgeCheck className="w-5 h-5 text-warning-600 dark:text-warning-400" />
+                    <div>
+                      <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Badges & Credentials</h3>
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                        {(volunteer.badges ?? []).length} badge{(volunteer.badges ?? []).length !== 1 ? 's' : ''} earned
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {(volunteer.badges ?? []).length === 0 ? (
+                  <div className="text-center py-12 text-neutral-400">
+                    <BadgeCheck className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No badges issued to this volunteer yet.</p>
+                    <p className="text-xs mt-1">Go to <strong>Badges</strong> in the sidebar to issue one.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {(volunteer.badges ?? []).map((badge: VolunteerBadge) => {
+                      const isExpired = badge.expiresAt && new Date(badge.expiresAt) < new Date();
+                      return (
+                        <div
+                          key={badge.id}
+                          className={`flex items-start gap-4 p-4 border-2 rounded-xl ${
+                            isExpired
+                              ? 'border-neutral-200 dark:border-neutral-700 opacity-60'
+                              : 'border-neutral-100 dark:border-neutral-700'
+                          }`}
+                        >
+                          {/* Badge icon */}
+                          <div
+                            className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
+                            style={{ backgroundColor: badge.badgeColor + '22', border: `2px solid ${badge.badgeColor}44` }}
+                          >
+                            {badge.badgeIcon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{badge.badgeName}</p>
+                              {isExpired && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-700 text-neutral-500">Expired</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                              Issued {new Date(badge.issuedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} by {badge.issuedBy}
+                            </p>
+                            {badge.expiresAt && (
+                              <p className={`text-xs mt-0.5 ${isExpired ? 'text-danger-500' : 'text-neutral-400 dark:text-neutral-500'}`}>
+                                {isExpired ? 'Expired' : 'Expires'} {new Date(badge.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </p>
+                            )}
+                            {badge.note && (
+                              <p className="text-xs text-neutral-400 dark:text-neutral-500 italic mt-1">{badge.note}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {/* ── TRAINING TAB ─────────────────────────────────────────── */}
+            {rightTab === 'training' && (
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <GraduationCap className="w-5 h-5 text-success-600 dark:text-success-400" />
+                    <div>
+                      <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Completed Training</h3>
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                        {(volunteer.completedTrainings ?? []).length} course{(volunteer.completedTrainings ?? []).length !== 1 ? 's' : ''} completed
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {(volunteer.completedTrainings ?? []).length === 0 ? (
+                  <div className="text-center py-12 text-neutral-400">
+                    <GraduationCap className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No training completed yet.</p>
+                    <p className="text-xs mt-1">Go to <strong>Training</strong> in the sidebar to record a completion.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {(volunteer.completedTrainings ?? []).map((t) => (
+                      <div
+                        key={t.courseId + t.completedAt}
+                        className="flex items-center gap-4 p-4 rounded-xl border border-neutral-100 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50"
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-success-100 dark:bg-success-900/30 flex items-center justify-center flex-shrink-0">
+                          <CheckCircle className="w-5 h-5 text-success-600 dark:text-success-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">{t.courseTitle}</p>
+                          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                            Completed {new Date(t.completedAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-300 whitespace-nowrap">
+                          Complete
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
+
           </div>
         </div>
       </div>

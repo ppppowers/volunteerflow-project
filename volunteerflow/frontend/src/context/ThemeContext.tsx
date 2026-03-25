@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 
-type Theme = 'light' | 'dark';
+type Theme = 'light' | 'dark' | 'system';
 
 interface ThemeContextType {
   theme: Theme;
@@ -16,6 +16,11 @@ const ThemeContext = createContext<ThemeContextType>({
   setTheme: () => {},
 });
 
+function resolveEffectiveTheme(theme: Theme): 'light' | 'dark' {
+  if (theme !== 'system') return theme;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>('light');
   const [mounted, setMounted] = useState(false);
@@ -24,21 +29,33 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMounted(true);
     const savedTheme = localStorage.getItem('theme') as Theme | null;
-    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    setTheme(savedTheme || systemTheme);
+    if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+      setTheme(savedTheme);
+    } else {
+      // No saved preference — follow OS
+      setTheme('system');
+    }
   }, []);
 
-  // Apply theme to document
+  // Apply theme to document and listen for OS changes when system is active
   useEffect(() => {
     if (!mounted) return;
 
     const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
+    const apply = (t: Theme) => {
+      if (resolveEffectiveTheme(t) === 'dark') root.classList.add('dark');
+      else root.classList.remove('dark');
+    };
+
+    apply(theme);
     localStorage.setItem('theme', theme);
+
+    if (theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const handler = () => apply('system');
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    }
   }, [theme, mounted]);
 
   const toggleTheme = () => {

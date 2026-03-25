@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
+import Head from "next/head";
+import { api, ApiError } from "@/lib/api";
 
 // ─── ICONS ────────────────────────────────────────────────────────────────────
 
@@ -458,7 +460,7 @@ const styles = `
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
 type Screen = "landing" | "signin" | "signup" | "pricing" | "welcome";
-type PlanKey = "basic" | "advanced";
+type PlanKey = "discover" | "grow";
 
 interface FormErrors {
   [key: string]: string;
@@ -566,6 +568,7 @@ function SignInPage({ onSuccess, onGoSignUp }: { onSuccess: () => void; onGoSign
   const [showPw, setShowPw] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
   const [loading, setLoading] = useState(false);
+  const [forgotMsg, setForgotMsg] = useState('');
 
   const validate = (): FormErrors => {
     const e: FormErrors = {};
@@ -575,12 +578,24 @@ function SignInPage({ onSuccess, onGoSignUp }: { onSuccess: () => void; onGoSign
     return e;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const e = validate();
     setErrors(e);
     if (Object.keys(e).length) return;
     setLoading(true);
-    setTimeout(() => { setLoading(false); onSuccess(); }, 1000);
+    try {
+      const data = await api.post<{ token: string; user: { email: string; fullName: string; orgName: string; role: string } }>(
+        '/auth/login', { email, password }
+      );
+      localStorage.setItem('vf_token', data.token);
+      localStorage.setItem('vf_user', JSON.stringify({ email: data.user.email, name: data.user.fullName, orgName: data.user.orgName }));
+      onSuccess();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Login failed. Please try again.';
+      setErrors({ general: msg });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -621,8 +636,9 @@ function SignInPage({ onSuccess, onGoSignUp }: { onSuccess: () => void; onGoSign
           <div className="auth-form-group">
             <div className="forgot-row">
               <label className="auth-form-label" style={{ margin: 0 }}>Password</label>
-              <button className="forgot-link" type="button">Forgot password?</button>
+              <button className="forgot-link" type="button" onClick={() => setForgotMsg('Check your email for a password reset link.')}>Forgot password?</button>
             </div>
+            {forgotMsg && <p role="status" className="auth-field-hint" style={{ color: 'var(--success-600, #16a34a)', fontSize: 12, marginBottom: 4 }}>{forgotMsg}</p>}
             <div className="auth-input-wrap">
               <input
                 className={`auth-input${errors.password ? " is-error" : ""}`}
@@ -646,6 +662,7 @@ function SignInPage({ onSuccess, onGoSignUp }: { onSuccess: () => void; onGoSign
               <span className="auth-checkbox-label">Keep me signed in for 30 days</span>
             </label>
           </div>
+          {errors.general && <div className="auth-field-error" style={{ marginBottom: 12 }}>{errors.general}</div>}
           <button className="auth-btn-primary" type="button" onClick={handleSubmit} disabled={loading}>
             {loading ? "Signing in…" : "Sign In →"}
           </button>
@@ -686,12 +703,24 @@ function SignUpPage({ onSuccess, onGoSignIn }: { onSuccess: () => void; onGoSign
     return e;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const e = validate();
     setErrors(e);
     if (Object.keys(e).length) return;
     setLoading(true);
-    setTimeout(() => { setLoading(false); onSuccess(); }, 1000);
+    try {
+      const data = await api.post<{ token: string; user: { email: string; fullName: string; role: string } }>(
+        '/auth/register', { fullName: form.fullName, email: form.email, password: form.password, orgName: form.orgName }
+      );
+      localStorage.setItem('vf_token', data.token);
+      localStorage.setItem('vf_user', JSON.stringify({ email: data.user.email, name: data.user.fullName }));
+      onSuccess();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Registration failed. Please try again.';
+      setErrors({ general: msg });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const pwStrength = (p: string) => {
@@ -807,15 +836,15 @@ function SignUpPage({ onSuccess, onGoSignIn }: { onSuccess: () => void; onGoSign
 // ─── PRICING ──────────────────────────────────────────────────────────────────
 
 const PLANS = {
-  basic: {
-    name: "Basic", monthly: 29, yearly: 19,
-    desc: "Perfect for small nonprofits just getting started with volunteer coordination.",
-    features: ["Up to 100 active volunteers", "5 events per month", "Basic application forms", "Email notifications", "Standard reporting", "Community support"],
+  discover: {
+    name: "Discover", monthly: 49, yearly: 41,
+    desc: "Everything you need to launch your volunteer program and start making an impact.",
+    features: ["2 admin seats", "Unlimited volunteers & events", "Email & SMS messaging", "10,000 SMS / year", "Automated reminders & templates", "CSV export & mobile app"],
   },
-  advanced: {
-    name: "Advanced", monthly: 79, yearly: 55,
-    desc: "Everything you need to run a large-scale volunteer program at full power.",
-    features: ["Unlimited volunteers", "Unlimited events", "Custom form builder", "Advanced analytics & reports", "Bulk approve / reject tools", "Priority email & chat support", "API access & integrations", "Dedicated account manager"],
+  grow: {
+    name: "Grow", monthly: 149, yearly: 124,
+    desc: "Advanced tools for growing nonprofits ready to professionalize their volunteer operations.",
+    features: ["10 admin seats", "50,000 SMS / year", "Custom design & branding", "Group registration", "Applicant vetting workflows", "Hours & attendance tracking", "File library & data import", "Job permissions"],
   },
 };
 
@@ -877,44 +906,44 @@ function PricingPage({ onChoosePlan }: { onChoosePlan: (plan: PlanKey, yearly: b
       </div>
       <div className="pricing-cards vf-fade-up-delay">
         <div className="pricing-card">
-          <div className="card-plan is-light">{PLANS.basic.name}</div>
+          <div className="card-plan is-light">{PLANS.discover.name}</div>
           <div className="card-price-row">
-            <span className="card-price is-light">${price("basic")}</span>
+            <span className="card-price is-light">${price("discover")}</span>
             <span className="card-price-per is-light">/mo</span>
           </div>
-          {yearly ? <div className="card-price-annual is-light">Save {save("basic")}% vs monthly</div> : <div style={{ height: 24 }} />}
-          <p className="card-desc is-light">{PLANS.basic.desc}</p>
+          {yearly ? <div className="card-price-annual is-light">Save {save("discover")}% vs monthly</div> : <div style={{ height: 24 }} />}
+          <p className="card-desc is-light">{PLANS.discover.desc}</p>
           <div className="card-features">
-            {PLANS.basic.features.map(f => (
+            {PLANS.discover.features.map(f => (
               <div className="card-feature is-light" key={f}>
                 <div className="feature-check is-light"><CheckIcon size={10} /></div>
                 {f}
               </div>
             ))}
           </div>
-          <button className="btn-plan-light" type="button" onClick={() => handleChoose("basic")} disabled={confirming}>
-            {confirming && selected === "basic" ? "Confirming…" : "Choose Basic"}
+          <button className="btn-plan-light" type="button" onClick={() => handleChoose("discover")} disabled={confirming}>
+            {confirming && selected === "discover" ? "Confirming…" : "Choose Discover"}
           </button>
         </div>
         <div className="pricing-card is-featured">
           <div className="featured-badge">⭐ Most Popular</div>
-          <div className="card-plan is-dark">{PLANS.advanced.name}</div>
+          <div className="card-plan is-dark">{PLANS.grow.name}</div>
           <div className="card-price-row">
-            <span className="card-price is-dark">${price("advanced")}</span>
+            <span className="card-price is-dark">${price("grow")}</span>
             <span className="card-price-per is-dark">/mo</span>
           </div>
-          {yearly ? <div className="card-price-annual is-dark">Save {save("advanced")}% vs monthly</div> : <div style={{ height: 24 }} />}
-          <p className="card-desc is-dark">{PLANS.advanced.desc}</p>
+          {yearly ? <div className="card-price-annual is-dark">Save {save("grow")}% vs monthly</div> : <div style={{ height: 24 }} />}
+          <p className="card-desc is-dark">{PLANS.grow.desc}</p>
           <div className="card-features">
-            {PLANS.advanced.features.map(f => (
+            {PLANS.grow.features.map(f => (
               <div className="card-feature is-dark" key={f}>
                 <div className="feature-check is-dark"><CheckIcon size={10} /></div>
                 {f}
               </div>
             ))}
           </div>
-          <button className="btn-plan-dark" type="button" onClick={() => handleChoose("advanced")} disabled={confirming}>
-            {confirming && selected === "advanced" ? "Confirming…" : "Choose Advanced"}
+          <button className="btn-plan-dark" type="button" onClick={() => handleChoose("grow")} disabled={confirming}>
+            {confirming && selected === "grow" ? "Confirming…" : "Choose Grow"}
           </button>
         </div>
       </div>
@@ -922,25 +951,26 @@ function PricingPage({ onChoosePlan }: { onChoosePlan: (plan: PlanKey, yearly: b
         <div className="comparison-title">Plan comparison</div>
         <div className="comparison-row">
           <div />
-          <div className="comp-header">Basic</div>
-          <div className="comp-header">Advanced</div>
+          <div className="comp-header">Discover</div>
+          <div className="comp-header">Grow</div>
         </div>
         {[
-          ["Active volunteers", "Up to 100", "Unlimited"],
-          ["Events per month", "5", "Unlimited"],
-          ["Custom form builder", "no", "yes"],
-          ["Advanced analytics", "no", "yes"],
-          ["API access", "no", "yes"],
-          ["Priority support", "no", "yes"],
-          ["Dedicated account manager", "no", "yes"],
-        ].map(([feat, basic, adv]) => (
+          ["Admin seats", "2", "10"],
+          ["Active volunteers", "Unlimited", "Unlimited"],
+          ["SMS credits / year", "10,000", "50,000"],
+          ["Custom branding", "no", "yes"],
+          ["Group registration", "no", "yes"],
+          ["Hours & attendance tracking", "no", "yes"],
+          ["Applicant vetting", "no", "yes"],
+          ["Data import", "no", "yes"],
+        ].map(([feat, discover, grow]) => (
           <div className="comparison-row" key={feat}>
             <div className="comp-feature">{feat}</div>
-            <div className={`comp-val ${basic === "yes" ? "is-yes" : basic === "no" ? "is-no" : "is-amt"}`}>
-              {basic === "yes" ? "✓" : basic === "no" ? "—" : basic}
+            <div className={`comp-val ${discover === "yes" ? "is-yes" : discover === "no" ? "is-no" : "is-amt"}`}>
+              {discover === "yes" ? "✓" : discover === "no" ? "—" : discover}
             </div>
-            <div className={`comp-val ${adv === "yes" ? "is-yes" : adv === "no" ? "is-no" : "is-amt"}`}>
-              {adv === "yes" ? "✓" : adv === "no" ? "—" : adv}
+            <div className={`comp-val ${grow === "yes" ? "is-yes" : grow === "no" ? "is-no" : "is-amt"}`}>
+              {grow === "yes" ? "✓" : grow === "no" ? "—" : grow}
             </div>
           </div>
         ))}
@@ -953,7 +983,7 @@ function PricingPage({ onChoosePlan }: { onChoosePlan: (plan: PlanKey, yearly: b
 // ─── DASHBOARD WELCOME ────────────────────────────────────────────────────────
 
 function DashboardWelcome({ plan, yearly, onEnter }: { plan: PlanKey; yearly: boolean; onEnter: () => void }) {
-  const planName = plan === "advanced" ? "Advanced" : "Basic";
+  const planName = plan === "grow" ? "Grow" : "Discover";
   const billing = yearly ? "yearly" : "monthly";
   return (
     <div className="welcome-shell">
@@ -1002,17 +1032,20 @@ function DashboardWelcome({ plan, yearly, onEnter }: { plan: PlanKey; yearly: bo
 export default function AuthPage() {
   const router = useRouter();
   const [screen, setScreen] = useState<Screen>("landing");
-  const [selectedPlan, setSelectedPlan] = useState<PlanKey>("basic");
+  const [selectedPlan, setSelectedPlan] = useState<PlanKey>("discover");
   const [yearly, setYearly] = useState(false);
 
   const handleAuthSuccess = () => {
-    localStorage.setItem("vf_authed", "true");
     router.push("/");
   };
 
   return (
     <div className="auth-page">
-      <style>{styles}</style>
+      <Head>
+        <title>Sign In — VolunteerFlow</title>
+        <meta name="description" content="Sign in to your VolunteerFlow nonprofit management dashboard." />
+      </Head>
+      <style dangerouslySetInnerHTML={{ __html: styles }} />
       {screen === "landing" && (
         <LandingPage
           onSignIn={() => setScreen("signin")}
