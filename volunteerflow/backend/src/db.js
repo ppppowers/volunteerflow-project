@@ -534,6 +534,16 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_help_content_type      ON help_content(type);
   CREATE INDEX IF NOT EXISTS idx_help_content_published ON help_content(published);
   CREATE INDEX IF NOT EXISTS idx_help_content_order     ON help_content(type, sort_order);
+
+  -- ── System settings (global key/value store) ─────────────────────────────────
+  CREATE TABLE IF NOT EXISTS system_settings (
+    key         TEXT        PRIMARY KEY,
+    value       JSONB       NOT NULL,
+    updated_by  TEXT        REFERENCES staff_users(id) ON DELETE SET NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings (key);
 `;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -856,6 +866,20 @@ async function initDb() {
     await client.query(`UPDATE users SET role = 'role_member' WHERE role = 'member'`);
     // Load staff schema (tables + seed roles) — runs after customer tables exist
     await loadStaffSchema(client);
+    // Seed system_settings defaults (ON CONFLICT ensures we never overwrite existing values)
+    const systemSettingSeeds = [
+      ['signup_enabled', 'true'],
+      ['signup_closed_message', '"Signups are currently closed. Please check back soon."'],
+      ['maintenance_mode', 'false'],
+      ['maintenance_message', '"We are performing scheduled maintenance. We\'ll be back shortly."'],
+      ['feature_flags', '{"volunteer_portal":true,"member_portal":true,"employee_portal":true,"training":true,"vetting":true,"hours_tracking":true,"badges":true,"file_library":true,"messaging":true,"login_notifications":true,"data_import":true,"audit_logs":true,"portal_designer":true,"signup_forms":true}'],
+    ];
+    for (const [key, value] of systemSettingSeeds) {
+      await client.query(
+        'INSERT INTO system_settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO NOTHING',
+        [key, value]
+      );
+    }
     console.log('[DB] Schema ready.');
   } finally {
     client.release();
