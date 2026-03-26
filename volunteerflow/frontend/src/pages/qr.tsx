@@ -25,6 +25,7 @@ import {
 } from '@/lib/qrManager';
 import { api } from '@/lib/api';
 import { usePlan } from '@/context/usePlan';
+import { PlanGate } from '@/components/PlanGate';
 
 // ─── Dynamic QR component ─────────────────────────────────────────────────────
 
@@ -533,14 +534,14 @@ function QrCard({ qr, campaigns, canAnalytics, onDelete, onToggle, onAnalytics }
 
 // ─── Campaign detail view ─────────────────────────────────────────────────────
 
-function CampaignDetail({ campaign, allCodes, campaigns, canAnalytics, onBack, onRefresh }: {
+function CampaignDetail({ campaign, allCodes, campaigns, onBack, onRefresh }: {
   campaign: Campaign;
   allCodes: SavedQrCode[];
   campaigns: Campaign[];
-  canAnalytics: boolean;
   onBack: () => void;
   onRefresh: () => void;
 }) {
+  const { can } = usePlan();
   const [showCreator, setShowCreator] = useState(false);
   const [analyticsQr, setAnalyticsQr] = useState<SavedQrCode | null>(null);
   const codes = allCodes.filter((q) => q.campaignId === campaign.id);
@@ -571,7 +572,7 @@ function CampaignDetail({ campaign, allCodes, campaigns, canAnalytics, onBack, o
       .catch(() => toast.error('Failed to update QR code'));
   }
 
-  if (analyticsQr && canAnalytics) {
+  if (analyticsQr) {
     return (
       <div className="space-y-5">
         <div className="flex items-center gap-3">
@@ -581,7 +582,9 @@ function CampaignDetail({ campaign, allCodes, campaigns, canAnalytics, onBack, o
           <span className="text-neutral-300 dark:text-neutral-600">·</span>
           <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{analyticsQr.name}</span>
         </div>
-        <AnalyticsPanel qr={analyticsQr} />
+        <PlanGate feature="qr_analytics">
+          <AnalyticsPanel qr={analyticsQr} />
+        </PlanGate>
       </div>
     );
   }
@@ -639,10 +642,10 @@ function CampaignDetail({ campaign, allCodes, campaigns, canAnalytics, onBack, o
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {codes.map((qr) => (
-            <QrCard key={qr.id} qr={qr} campaigns={campaigns} canAnalytics={canAnalytics}
+            <QrCard key={qr.id} qr={qr} campaigns={campaigns} canAnalytics={can('qr_analytics')}
               onDelete={() => handleDelete(qr.id)}
               onToggle={() => handleToggle(qr)}
-              onAnalytics={() => canAnalytics && setAnalyticsQr(qr)}
+              onAnalytics={() => setAnalyticsQr(qr)}
             />
           ))}
         </div>
@@ -823,7 +826,6 @@ export default function QrPage() {
               campaign={selectedCampaign}
               allCodes={codes}
               campaigns={campaigns}
-              canAnalytics={canAnalytics}
               onBack={() => setSelectedCampaign(null)}
               onRefresh={load}
             />
@@ -921,7 +923,7 @@ export default function QrPage() {
                   <QrCard key={qr.id} qr={qr} campaigns={campaigns} canAnalytics={canAnalytics}
                     onDelete={() => handleDeleteQr(qr.id)}
                     onToggle={() => handleToggleQr(qr)}
-                    onAnalytics={() => { if (canAnalytics) { setAnalyticsQr(qr); setTab('analytics'); } }}
+                    onAnalytics={() => { setAnalyticsQr(qr); setTab('analytics'); }}
                   />
                 ))}
               </div>
@@ -939,7 +941,7 @@ export default function QrPage() {
 
         {/* ── Analytics tab ────────────────────────────────────────────────── */}
         {tab === 'analytics' && (
-          canAnalytics ? (
+          <PlanGate feature="qr_analytics">
             <div className="space-y-5">
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-sm text-neutral-500 dark:text-neutral-400">Viewing:</span>
@@ -951,14 +953,7 @@ export default function QrPage() {
               {analyticsQr ? <AnalyticsPanel qr={analyticsQr} />
                 : <Card className="p-12 text-center"><BarChart2 className="w-12 h-12 text-neutral-300 dark:text-neutral-600 mx-auto mb-3" /><p className="text-neutral-500 dark:text-neutral-400">Select a QR code above to view analytics.</p></Card>}
             </div>
-          ) : (
-            <Card className="p-12 text-center">
-              <Lock className="w-12 h-12 text-neutral-300 dark:text-neutral-600 mx-auto mb-3" />
-              <p className="font-semibold text-neutral-700 dark:text-neutral-300">Analytics require the Grow plan</p>
-              <p className="text-sm text-neutral-500 mt-1 max-w-sm mx-auto">Upgrade to unlock scan tracking, device breakdown, location data, and more.</p>
-              <div className="mt-5"><Button variant="primary">Upgrade to Grow</Button></div>
-            </Card>
-          )
+          </PlanGate>
         )}
       </div>
     </Layout>
