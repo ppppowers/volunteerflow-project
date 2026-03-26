@@ -713,8 +713,6 @@ export default function FilesPage() {
           </div>
         </div>
       </div>
-      </PlanGate>
-
       {showFolderModal && <FolderModal onSave={createFolder} onClose={() => setShowFolderModal(false)} />}
       {showAddFileModal && (
         <AddFileModal
@@ -725,6 +723,7 @@ export default function FilesPage() {
           onClose={() => setShowAddFileModal(false)}
         />
       )}
+      </PlanGate>
 
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-semibold rounded-xl shadow-2xl">

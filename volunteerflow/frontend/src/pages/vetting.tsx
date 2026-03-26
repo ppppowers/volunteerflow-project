@@ -480,8 +480,6 @@ export default function VettingPage() {
           ))}
         </div>
       </div>
-      </PlanGate>
-
       {selected && (
         <DetailPanel
           applicant={selected}
@@ -489,6 +487,7 @@ export default function VettingPage() {
           onClose={() => setSelected(null)}
         />
       )}
+      </PlanGate>
     </Layout>
   );
 }
