@@ -1419,19 +1419,16 @@ function RolesTab() {
     } catch { /* silent */ }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
   const enabledCount = role ? Object.values(role.permissions).filter(Boolean).length : 0;
   const totalCount = PERM_KEYS.length;
 
   return (
     <PlanGate feature="role_permissions">
+    {loading ? (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    ) : (
     <div className="space-y-6">
       <Card className="p-6">
         <div className="flex items-start justify-between mb-5">
@@ -1613,6 +1610,7 @@ function RolesTab() {
         )}
       </Card>
     </div>
+    )}
     </PlanGate>
   );
 }
@@ -1703,10 +1701,11 @@ function BrandingTab() {
     { name: 'Forest',     primary: '#16a34a', accent: '#052e16', gradient: 'linear-gradient(135deg, #86efac 0%, #16a34a 55%, #052e16 100%)' },
   ];
 
-  if (loading) return <div className="animate-pulse space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 bg-neutral-100 dark:bg-neutral-800 rounded-xl" />)}</div>;
-
   return (
     <PlanGate feature="custom_branding">
+    {loading ? (
+      <div className="animate-pulse space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 bg-neutral-100 dark:bg-neutral-800 rounded-xl" />)}</div>
+    ) : (
     <div className="space-y-6">
       {saveError && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-400 text-sm">
@@ -1931,6 +1930,7 @@ function BrandingTab() {
 
       <SaveBanner saved={saved} saving={saving} onSave={handleSave} />
     </div>
+    )}
     </PlanGate>
   );
 }

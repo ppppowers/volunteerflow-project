@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { PlanGate } from '@/components/PlanGate';
 import toast from 'react-hot-toast';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -341,7 +340,6 @@ export function GroupTab({
   };
 
   return (
-    <PlanGate feature="group_registration">
     <div className="space-y-4">
       {/* Signup link banner */}
       <div
@@ -560,6 +558,5 @@ export function GroupTab({
         />
       )}
     </div>
-    </PlanGate>
   );
 }
