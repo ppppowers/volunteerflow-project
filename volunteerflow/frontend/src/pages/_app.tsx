@@ -41,18 +41,20 @@ const ACCENT_PALETTES: Record<string, Record<string, string>> = {
 function PlanLoader() {
   const { setPlan } = usePlan();
   useEffect(() => {
-    // Guard required: api client redirects to login on 401, which would
-    // create an infinite loop on public pages (landing, pricing, signup).
     const token = localStorage.getItem('vf_token');
     if (!token) return;
-    api.get<{ plan: string }>('/billing/plan')
-      .then(res => {
-        const plan = res?.plan;
+    // Use raw fetch — api.get() redirects to /landing?mode=signin on 401,
+    // which would pop the sign-in modal for any expired token.
+    const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
+    fetch(`${base}/billing/plan`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        const plan = json?.data?.plan;
         if (plan === 'discover' || plan === 'grow' || plan === 'enterprise') {
           setPlan(plan as PlanId);
         }
       })
-      .catch(() => { /* expired token or network error — stay on discover */ });
+      .catch(() => {});
   }, [setPlan]);
   return null;
 }
