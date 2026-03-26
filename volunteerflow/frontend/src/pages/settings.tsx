@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { PayPalButtons, PayPalScriptProvider } from '@paypal/react-paypal-js';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
 import Card from '@/components/Card';
@@ -44,6 +43,7 @@ import {
 import { SignupFormBuilder } from '@/components/people/SignupFormBuilder';
 import { signupFormConfigs } from '@/lib/signupForms';
 import { PlanGate } from '@/components/PlanGate';
+import PaymentGatewayModal from '@/components/PaymentGatewayModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1969,6 +1969,7 @@ function BillingTab() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [paypalError, setPaypalError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [isGatewayOpen, setIsGatewayOpen] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -2209,47 +2210,25 @@ function BillingTab() {
                 Activate your <strong>{plan?.name}</strong> plan for{' '}
                 <strong>${price}/{billingData?.billingCycle === 'yearly' ? 'year' : 'month'}</strong>.
               </p>
-
-              {/* Stripe checkout */}
-              <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-700 space-y-3">
-                <div className="flex items-center gap-2">
-                  <CreditCard className="w-4 h-4 text-neutral-500" />
-                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Pay with card</p>
-                </div>
-                <Button
-                  variant="primary"
-                  onClick={handleStripeCheckout}
-                  disabled={checkoutLoading}
-                  className="w-full"
-                >
-                  {checkoutLoading ? (
-                    <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />Redirecting…</>
-                  ) : (
-                    <>Subscribe with Stripe</>
-                  )}
-                </Button>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Secure checkout powered by Stripe — all major cards accepted</p>
-              </div>
-
-              {/* PayPal */}
-              {PAYPAL_CLIENT_ID ? (
-                <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-700 space-y-3">
-                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Or pay with PayPal</p>
-                  <PayPalScriptProvider options={{ clientId: PAYPAL_CLIENT_ID, vault: true, intent: 'subscription' }}>
-                    <PayPalButtons
-                      style={{ layout: 'horizontal', color: 'blue', shape: 'rect', label: 'subscribe' }}
-                      createSubscription={async (_data, actions) => {
-                        const { planId } = await api.get<{ planId: string }>(
-                          `/billing/paypal/plan-id?plan=${billingData?.plan}&cycle=${billingData?.billingCycle}`
-                        );
-                        return actions.subscription.create({ plan_id: planId });
-                      }}
-                      onApprove={(data) => handlePayPalApprove(data as { subscriptionID: string | null })}
-                      onError={() => setPaypalError('PayPal encountered an error. Please try again or use card payment.')}
-                    />
-                  </PayPalScriptProvider>
-                </div>
-              ) : null}
+              <Button
+                variant="primary"
+                onClick={() => setIsGatewayOpen(true)}
+                className="w-full sm:w-auto"
+              >
+                Subscribe
+              </Button>
+              <PaymentGatewayModal
+                isOpen={isGatewayOpen}
+                onClose={() => setIsGatewayOpen(false)}
+                planName={plan?.name ?? ''}
+                billingCycle={billingData?.billingCycle ?? 'monthly'}
+                price={price ?? 0}
+                plan={billingData?.plan ?? ''}
+                onStripeClick={handleStripeCheckout}
+                onPayPalApprove={handlePayPalApprove}
+                onPayPalError={() => setPaypalError('PayPal encountered an error. Please try again or use card payment.')}
+                stripeLoading={checkoutLoading}
+              />
             </div>
           )}
         </Card>
