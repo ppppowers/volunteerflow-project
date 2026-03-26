@@ -39,7 +39,11 @@ import {
   Copy,
   ExternalLink,
   Paintbrush,
+  ClipboardList,
 } from 'lucide-react';
+import { SignupFormBuilder } from '@/components/people/SignupFormBuilder';
+import { signupFormConfigs } from '@/lib/signupForms';
+import { PlanGate } from '@/components/PlanGate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,7 +57,8 @@ type SettingsTab =
   | 'branding'
   | 'security'
   | 'billing'
-  | 'data';
+  | 'data'
+  | 'signup-forms';
 
 interface TeamMember {
   id: string;
@@ -643,12 +648,26 @@ function NotificationsTab() {
 
 // RGB channel values (space-separated) for each accent color — used to set CSS vars at runtime
 const ACCENT_PALETTES: Record<string, Record<string, string>> = {
-  blue:   { '50':'239 246 255','100':'219 234 254','200':'191 219 254','300':'147 197 253','400':'96 165 250', '500':'59 130 246', '600':'37 99 235',  '700':'29 78 216',  '800':'30 64 175',  '900':'30 58 138'  },
-  purple: { '50':'245 243 255','100':'237 233 254','200':'221 214 254','300':'196 181 253','400':'167 139 250','500':'139 92 246', '600':'124 58 237', '700':'109 40 217', '800':'91 33 182',  '900':'76 29 149'  },
-  green:  { '50':'240 253 244','100':'220 252 231','200':'187 247 208','300':'134 239 172','400':'74 222 128', '500':'34 197 94',  '600':'22 163 74',  '700':'21 128 61',  '800':'22 101 52',  '900':'20 83 45'   },
-  orange: { '50':'255 247 237','100':'255 237 213','200':'254 215 170','300':'253 186 116','400':'251 146 60', '500':'249 115 22', '600':'234 88 12',  '700':'194 65 12',  '800':'154 52 18',  '900':'124 45 18'  },
-  red:    { '50':'254 242 242','100':'254 226 226','200':'254 202 202','300':'252 165 165','400':'248 113 113','500':'239 68 68',  '600':'220 38 38',  '700':'185 28 28',  '800':'153 27 27',  '900':'127 29 29'  },
-  teal:   { '50':'240 253 250','100':'204 251 241','200':'153 246 228','300':'94 234 212', '400':'45 212 191', '500':'20 184 166', '600':'13 148 136', '700':'15 118 110', '800':'17 94 89',   '900':'19 78 74'   },
+  // ── Classic solid colors ──────────────────────────────────────────────────
+  blue:     { '50':'239 246 255','100':'219 234 254','200':'191 219 254','300':'147 197 253','400':'96 165 250', '500':'59 130 246', '600':'37 99 235',  '700':'29 78 216',  '800':'30 64 175',  '900':'30 58 138'  },
+  purple:   { '50':'245 243 255','100':'237 233 254','200':'221 214 254','300':'196 181 253','400':'167 139 250','500':'139 92 246', '600':'124 58 237', '700':'109 40 217', '800':'91 33 182',  '900':'76 29 149'  },
+  green:    { '50':'240 253 244','100':'220 252 231','200':'187 247 208','300':'134 239 172','400':'74 222 128', '500':'34 197 94',  '600':'22 163 74',  '700':'21 128 61',  '800':'22 101 52',  '900':'20 83 45'   },
+  orange:   { '50':'255 247 237','100':'255 237 213','200':'254 215 170','300':'253 186 116','400':'251 146 60', '500':'249 115 22', '600':'234 88 12',  '700':'194 65 12',  '800':'154 52 18',  '900':'124 45 18'  },
+  red:      { '50':'254 242 242','100':'254 226 226','200':'254 202 202','300':'252 165 165','400':'248 113 113','500':'239 68 68',  '600':'220 38 38',  '700':'185 28 28',  '800':'153 27 27',  '900':'127 29 29'  },
+  teal:     { '50':'240 253 250','100':'204 251 241','200':'153 246 228','300':'94 234 212', '400':'45 212 191', '500':'20 184 166', '600':'13 148 136', '700':'15 118 110', '800':'17 94 89',   '900':'19 78 74'   },
+  // ── Signature themes (hue shifts across light→dark scale) ─────────────────
+  // Sunset: golden peachy tints → orange-red buttons → deep wine darks
+  sunset:   { '50':'255 247 237','100':'255 237 208','200':'255 212 160','300':'255 175 108','400':'255 137 55','500':'245 90 40',  '600':'218 58 35',  '700':'182 36 58',  '800':'148 22 66',  '900':'112 14 54'  },
+  // Ocean: pale sky-blue tints → cerulean buttons → deep navy darks
+  ocean:    { '50':'240 249 255','100':'214 240 253','200':'170 222 250','300':'108 196 240','400':'52 164 224','500':'8 136 204',  '600':'4 108 172',  '700':'3 86 140',   '800':'4 66 108',   '900':'5 50 80'    },
+  // Aurora: teal-mint tints → indigo buttons → deep violet darks (biggest hue shift)
+  aurora:   { '50':'237 255 252','100':'207 252 244','200':'162 244 232','300':'110 226 210','400':'90 178 236','500':'99 102 241', '600':'79 70 229',  '700':'67 56 202',  '800':'58 46 172',  '900':'49 38 148'  },
+  // Ember: warm golden tints → deep amber buttons → rich brown darks
+  ember:    { '50':'255 252 232','100':'255 243 198','200':'255 228 152','300':'252 204 82', '400':'240 170 28','500':'215 133 8',  '600':'182 102 4',  '700':'146 74 4',   '800':'114 54 4',   '900':'86 38 4'    },
+  // Rose: blush-pink tints → warm rose buttons → deep berry darks
+  rose:     { '50':'255 241 244','100':'255 215 223','200':'255 182 200','300':'252 145 172','400':'244 106 146','500':'230 68 114','600':'208 45 91',  '700':'176 31 72',  '800':'145 24 57',  '900':'116 18 44'  },
+  // Midnight: dusty lavender tints → rich indigo buttons → deep midnight darks
+  midnight: { '50':'245 244 255','100':'230 228 252','200':'206 203 245','300':'172 168 236','400':'134 128 218','500':'100 96 198','600':'80 74 178',  '700':'63 56 152',  '800':'48 40 126',  '900':'36 28 100'  },
 };
 
 function applyAccentColor(color: string) {
@@ -697,13 +716,52 @@ function AppearanceTab() {
     { value: 'system' as const, icon: Monitor, label: 'System', desc: 'Follows OS setting' },
   ];
 
-  const accentColors = [
-    { value: 'blue',   color: 'bg-blue-500',   ring: 'ring-blue-500'   },
-    { value: 'purple', color: 'bg-purple-500',  ring: 'ring-purple-500' },
-    { value: 'green',  color: 'bg-green-500',   ring: 'ring-green-500'  },
-    { value: 'orange', color: 'bg-orange-500',  ring: 'ring-orange-500' },
-    { value: 'red',    color: 'bg-red-500',     ring: 'ring-red-500'    },
-    { value: 'teal',   color: 'bg-teal-500',    ring: 'ring-teal-500'   },
+  const solidColors = [
+    { value: 'blue',   color: 'bg-blue-500',   ring: 'ring-blue-500',   label: 'Blue'   },
+    { value: 'purple', color: 'bg-purple-500',  ring: 'ring-purple-500', label: 'Purple' },
+    { value: 'green',  color: 'bg-green-500',   ring: 'ring-green-500',  label: 'Green'  },
+    { value: 'orange', color: 'bg-orange-500',  ring: 'ring-orange-500', label: 'Orange' },
+    { value: 'red',    color: 'bg-red-500',     ring: 'ring-red-500',    label: 'Red'    },
+    { value: 'teal',   color: 'bg-teal-500',    ring: 'ring-teal-500',   label: 'Teal'   },
+  ];
+
+  const signatureThemes = [
+    {
+      value: 'sunset',
+      label: 'Sunset',
+      desc: 'Golden orange to deep crimson',
+      gradient: 'linear-gradient(135deg, #ff8937 0%, #da3a23 55%, #700e36 100%)',
+    },
+    {
+      value: 'ocean',
+      label: 'Ocean',
+      desc: 'Sky blue to deep navy',
+      gradient: 'linear-gradient(135deg, #6cc4f0 0%, #0888cc 55%, #053250 100%)',
+    },
+    {
+      value: 'aurora',
+      label: 'Aurora',
+      desc: 'Teal haze to deep indigo',
+      gradient: 'linear-gradient(135deg, #a2f4e8 0%, #6366f1 55%, #312694 100%)',
+    },
+    {
+      value: 'ember',
+      label: 'Ember',
+      desc: 'Warm gold to rich brown',
+      gradient: 'linear-gradient(135deg, #fccc52 0%, #d78508 55%, #562604 100%)',
+    },
+    {
+      value: 'rose',
+      label: 'Rose',
+      desc: 'Blush pink to deep berry',
+      gradient: 'linear-gradient(135deg, #fc91ac 0%, #e64472 55%, #74122c 100%)',
+    },
+    {
+      value: 'midnight',
+      label: 'Midnight',
+      desc: 'Dusty lavender to deep indigo',
+      gradient: 'linear-gradient(135deg, #aca8ec 0%, #6460c6 55%, #241c64 100%)',
+    },
   ];
 
   return (
@@ -740,19 +798,61 @@ function AppearanceTab() {
 
       <Card className="p-6">
         <SectionTitle title="Accent Color" subtitle="Personalize the primary color used across the interface" />
-        <div className="flex flex-wrap gap-3">
-          {accentColors.map((c) => (
+
+        {/* Classic solid colors */}
+        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-2">Classic</p>
+        <div className="flex flex-wrap gap-3 mb-5">
+          {solidColors.map((c) => (
             <button
               key={c.value}
               onClick={() => { setAccentColor(c.value); applyAccentColor(c.value); }}
-              className={`w-10 h-10 rounded-full ${c.color} transition-all ${
-                accentColor === c.value ? `ring-2 ring-offset-2 ${c.ring} ring-offset-white dark:ring-offset-neutral-900 scale-110` : 'hover:scale-105'
+              className={`w-9 h-9 rounded-full ${c.color} transition-all ${
+                accentColor === c.value
+                  ? `ring-2 ring-offset-2 ${c.ring} ring-offset-white dark:ring-offset-neutral-900 scale-110`
+                  : 'hover:scale-105'
               }`}
-              title={c.value}
+              title={c.label}
             />
           ))}
         </div>
-        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Color applies immediately across the interface and is saved with your other preferences.</p>
+
+        {/* Signature gradient themes */}
+        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-2">Signature Themes</p>
+        <div className="grid grid-cols-3 gap-2.5">
+          {signatureThemes.map((t) => {
+            const isActive = accentColor === t.value;
+            return (
+              <button
+                key={t.value}
+                onClick={() => { setAccentColor(t.value); applyAccentColor(t.value); }}
+                className={`relative overflow-hidden rounded-xl border-2 transition-all text-left ${
+                  isActive
+                    ? 'border-neutral-800 dark:border-neutral-200 shadow-md scale-[1.03]'
+                    : 'border-transparent hover:border-neutral-300 dark:hover:border-neutral-600 hover:shadow-sm'
+                }`}
+              >
+                {/* Gradient swatch */}
+                <div
+                  className="h-10 w-full"
+                  style={{ background: t.gradient }}
+                />
+                {/* Label */}
+                <div className="px-2.5 py-2 bg-white dark:bg-neutral-800">
+                  <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-100 leading-tight">{t.label}</p>
+                  <p className="text-[10px] text-neutral-400 dark:text-neutral-500 leading-tight mt-0.5">{t.desc}</p>
+                </div>
+                {/* Selected checkmark */}
+                {isActive && (
+                  <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-white/90 dark:bg-neutral-900/90 rounded-full flex items-center justify-center shadow-sm">
+                    <Check className="w-3 h-3 text-neutral-800 dark:text-neutral-100" />
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Changes apply instantly and are saved with your preferences.</p>
       </Card>
 
       <Card className="p-6">
@@ -1331,6 +1431,7 @@ function RolesTab() {
   const totalCount = PERM_KEYS.length;
 
   return (
+    <PlanGate feature="role_permissions">
     <div className="space-y-6">
       <Card className="p-6">
         <div className="flex items-start justify-between mb-5">
@@ -1512,6 +1613,7 @@ function RolesTab() {
         )}
       </Card>
     </div>
+    </PlanGate>
   );
 }
 
@@ -1585,17 +1687,26 @@ function BrandingTab() {
   };
 
   const PRESET_COLORS = [
-    { name: 'Emerald', primary: '#10b981', accent: '#0d9488' },
-    { name: 'Blue', primary: '#3b82f6', accent: '#2563eb' },
-    { name: 'Violet', primary: '#8b5cf6', accent: '#7c3aed' },
-    { name: 'Orange', primary: '#f59e0b', accent: '#d97706' },
-    { name: 'Rose', primary: '#f43f5e', accent: '#e11d48' },
-    { name: 'Slate', primary: '#475569', accent: '#334155' },
+    // Classic solid
+    { name: 'Emerald',    primary: '#10b981', accent: '#0d9488', gradient: 'linear-gradient(135deg, #34d399 0%, #10b981 50%, #047857 100%)' },
+    { name: 'Sky Blue',   primary: '#3b82f6', accent: '#1d4ed8', gradient: 'linear-gradient(135deg, #93c5fd 0%, #3b82f6 50%, #1d4ed8 100%)' },
+    { name: 'Violet',     primary: '#8b5cf6', accent: '#6d28d9', gradient: 'linear-gradient(135deg, #c4b5fd 0%, #8b5cf6 50%, #6d28d9 100%)' },
+    { name: 'Crimson',    primary: '#ef4444', accent: '#b91c1c', gradient: 'linear-gradient(135deg, #fca5a5 0%, #ef4444 50%, #991b1b 100%)' },
+    { name: 'Slate',      primary: '#475569', accent: '#1e293b', gradient: 'linear-gradient(135deg, #94a3b8 0%, #475569 50%, #1e293b 100%)' },
+    // Signature gradient themes
+    { name: 'Sunset',     primary: '#f55a23', accent: '#9b1b3a', gradient: 'linear-gradient(135deg, #fb923c 0%, #f55a23 50%, #9b1b3a 100%)' },
+    { name: 'Deep Ocean', primary: '#0e86d4', accent: '#001e3c', gradient: 'linear-gradient(135deg, #38bdf8 0%, #0e86d4 55%, #001e3c 100%)' },
+    { name: 'Aurora',     primary: '#6366f1', accent: '#312694', gradient: 'linear-gradient(135deg, #a2f4e8 0%, #6366f1 60%, #312694 100%)' },
+    { name: 'Ember',      primary: '#d97706', accent: '#7c2d12', gradient: 'linear-gradient(135deg, #fcd34d 0%, #d97706 55%, #7c2d12 100%)' },
+    { name: 'Rose Petal', primary: '#f43f5e', accent: '#881337', gradient: 'linear-gradient(135deg, #fda4af 0%, #f43f5e 55%, #881337 100%)' },
+    { name: 'Midnight',   primary: '#5b5bd6', accent: '#1e1b4b', gradient: 'linear-gradient(135deg, #a5b4fc 0%, #5b5bd6 55%, #1e1b4b 100%)' },
+    { name: 'Forest',     primary: '#16a34a', accent: '#052e16', gradient: 'linear-gradient(135deg, #86efac 0%, #16a34a 55%, #052e16 100%)' },
   ];
 
   if (loading) return <div className="animate-pulse space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 bg-neutral-100 dark:bg-neutral-800 rounded-xl" />)}</div>;
 
   return (
+    <PlanGate feature="custom_branding">
     <div className="space-y-6">
       {saveError && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-400 text-sm">
@@ -1683,23 +1794,33 @@ function BrandingTab() {
       {/* Colors */}
       <Card className="p-6">
         <SectionTitle title="Brand Colors" subtitle="Applied to buttons, links, and highlights in the volunteer portal" />
-        <div className="mb-4">
-          <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-3">Quick presets</p>
-          <div className="flex flex-wrap gap-3">
-            {PRESET_COLORS.map((p) => (
-              <button
-                key={p.name}
-                onClick={() => { set('primaryColor')(p.primary); set('accentColor')(p.accent); }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                  form.primaryColor === p.primary
-                    ? 'border-neutral-900 dark:border-neutral-100 bg-neutral-50 dark:bg-neutral-800'
-                    : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-300'
-                }`}
-              >
-                <span className="w-4 h-4 rounded-full flex-shrink-0" style={{ background: p.primary }} />
-                {p.name}
-              </button>
-            ))}
+        <div className="mb-5">
+          <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-2.5">Theme Presets</p>
+          <div className="grid grid-cols-4 gap-2">
+            {PRESET_COLORS.map((p) => {
+              const isActive = form.primaryColor === p.primary;
+              return (
+                <button
+                  key={p.name}
+                  onClick={() => { set('primaryColor')(p.primary); set('accentColor')(p.accent); }}
+                  className={`relative overflow-hidden rounded-xl border-2 transition-all text-left ${
+                    isActive
+                      ? 'border-neutral-800 dark:border-neutral-100 shadow-md scale-[1.04]'
+                      : 'border-transparent hover:border-neutral-300 dark:hover:border-neutral-600 hover:shadow-sm'
+                  }`}
+                >
+                  <div className="h-8 w-full" style={{ background: p.gradient }} />
+                  <div className="px-2 py-1.5 bg-white dark:bg-neutral-800">
+                    <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-100 leading-tight truncate">{p.name}</p>
+                  </div>
+                  {isActive && (
+                    <div className="absolute top-1 right-1 w-4 h-4 bg-white/90 dark:bg-neutral-900/90 rounded-full flex items-center justify-center shadow-sm">
+                      <Check className="w-2.5 h-2.5 text-neutral-800 dark:text-neutral-100" />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -1810,6 +1931,7 @@ function BrandingTab() {
 
       <SaveBanner saved={saved} saving={saving} onSave={handleSave} />
     </div>
+    </PlanGate>
   );
 }
 
@@ -2294,7 +2416,7 @@ function DataTab() {
         // Wipe local state and redirect to auth
         localStorage.removeItem('vf_token');
         localStorage.removeItem('vf_user');
-        window.location.href = '/auth';
+        window.location.href = '/landing';
       }
     } catch (err: any) {
       setDangerError(err?.message || 'Action failed. Please try again.');
@@ -2622,19 +2744,93 @@ function MessagingTab() {
   );
 }
 
+// ─── SignupFormTab ──────────────────────────────────────────────────────────────
+
+const FORM_TYPES = [
+  { type: 'volunteer' as const, label: 'Volunteer Profile',  icon: UserCheck, desc: 'Fields volunteers fill out when creating their account after approval.'  },
+  { type: 'member'    as const, label: 'Member Profile',     icon: Users,     desc: 'Fields members fill out when creating their account after approval.'    },
+  { type: 'employee'  as const, label: 'Employee Profile',   icon: Crown,     desc: 'Fields employees fill out when creating their account after approval.'  },
+];
+
+function SignupFormTab() {
+  const [editing, setEditing] = useState<'volunteer' | 'member' | 'employee' | null>(null);
+  const [fieldCounts, setFieldCounts] = useState<Record<string, { active: number; total: number }>>({});
+
+  const refreshCounts = () => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}');
+      const counts: Record<string, { active: number; total: number }> = {};
+      for (const { type } of FORM_TYPES) {
+        const fields = (stored[type] ?? signupFormConfigs[type]).fields;
+        counts[type] = { active: fields.filter((f: { enabled: boolean }) => f.enabled).length, total: fields.length };
+      }
+      setFieldCounts(counts);
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { refreshCounts(); }, []);
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        Configure the profile form that approved applicants fill out when creating their account. Toggle fields on or off, mark them required, add custom questions, and reorder them.
+      </p>
+
+      <div className="space-y-3">
+        {FORM_TYPES.map(({ type, label, desc, icon: Icon }) => {
+          const counts = fieldCounts[type] ?? { active: 0, total: 0 };
+          return (
+            <div
+              key={type}
+              className="flex items-center justify-between p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-primary-50 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{label}</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {counts.active} of {counts.total} fields active · {desc}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditing(type)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex-shrink-0"
+              >
+                <Edit className="w-3.5 h-3.5" />
+                Customize
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {editing && (
+        <SignupFormBuilder
+          type={editing}
+          onClose={() => { setEditing(null); refreshCounts(); }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Building2 }[] = [
-  { id: 'organization', label: 'Organization', icon: Building2 },
-  { id: 'team', label: 'Team', icon: Users },
-  { id: 'roles', label: 'Roles & Perms', icon: Shield },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'messaging', label: 'Messaging', icon: Mail },
-  { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'branding', label: 'Branding', icon: Paintbrush },
-  { id: 'security', label: 'Security', icon: Shield },
-  { id: 'billing', label: 'Billing', icon: CreditCard },
-  { id: 'data', label: 'Data & Privacy', icon: Database },
+  { id: 'organization', label: 'Organization',  icon: Building2     },
+  { id: 'team',         label: 'Team',           icon: Users         },
+  { id: 'roles',        label: 'Roles & Perms',  icon: Shield        },
+  { id: 'signup-forms', label: 'Signup Forms',   icon: ClipboardList },
+  { id: 'notifications',label: 'Notifications',  icon: Bell          },
+  { id: 'messaging',    label: 'Messaging',      icon: Mail          },
+  { id: 'appearance',   label: 'Appearance',     icon: Palette       },
+  { id: 'branding',     label: 'Branding',       icon: Paintbrush    },
+  { id: 'security',     label: 'Security',       icon: Shield        },
+  { id: 'billing',      label: 'Billing',        icon: CreditCard    },
+  { id: 'data',         label: 'Data & Privacy', icon: Database      },
 ];
 
 export default function Settings() {
@@ -2642,16 +2838,17 @@ export default function Settings() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case 'organization': return <OrganizationTab />;
-      case 'team': return <TeamTab />;
-      case 'roles': return <RolesTab />;
+      case 'organization':  return <OrganizationTab />;
+      case 'team':          return <TeamTab />;
+      case 'roles':         return <RolesTab />;
+      case 'signup-forms':  return <SignupFormTab />;
       case 'notifications': return <NotificationsTab />;
-      case 'messaging': return <MessagingTab />;
-      case 'appearance': return <AppearanceTab />;
-      case 'branding': return <BrandingTab />;
-      case 'security': return <SecurityTab />;
-      case 'billing': return <BillingTab />;
-      case 'data': return <DataTab />;
+      case 'messaging':     return <MessagingTab />;
+      case 'appearance':    return <AppearanceTab />;
+      case 'branding':      return <BrandingTab />;
+      case 'security':      return <SecurityTab />;
+      case 'billing':       return <BillingTab />;
+      case 'data':          return <DataTab />;
     }
   };
 

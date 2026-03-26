@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { PlanGate } from '@/components/PlanGate';
 import toast from 'react-hot-toast';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { api } from '@/lib/api';
 import {
   Search, Plus, Edit2, Trash2, X, Check, Link2,
-  Mail, Phone, Settings2, Users,
+  Mail, Phone, Settings2, Users, FileText,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ export interface PeopleGroup {
   slug: string;
   color: string;
   createdAt: string;
+  applicationTemplateId?: string | null;
 }
 
 interface GroupMember {
@@ -253,14 +255,18 @@ function EditGroupModal({
 
 // ─── GroupTab ──────────────────────────────────────────────────────────────────
 
+interface TemplateOption { id: string; name: string; }
+
 export function GroupTab({
   group,
   onDelete,
   onUpdate,
+  templates = [],
 }: {
   group: PeopleGroup;
   onDelete: () => void;
   onUpdate: (updated: PeopleGroup) => void;
+  templates?: TemplateOption[];
 }) {
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -289,10 +295,12 @@ export function GroupTab({
     });
   }, [members, search, statusFilter]);
 
-  const signupUrl =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/apply?group=${group.slug}`
-      : `/apply?group=${group.slug}`;
+  const signupUrl = (() => {
+    const base = typeof window !== 'undefined' ? window.location.origin : '';
+    const params = new URLSearchParams({ group: group.slug });
+    if (group.applicationTemplateId) params.set('form', group.applicationTemplateId);
+    return `${base}/apply?${params.toString()}`;
+  })();
 
   const handleSaveMember = (saved: GroupMember) => {
     setMembers((prev) => {
@@ -333,6 +341,7 @@ export function GroupTab({
   };
 
   return (
+    <PlanGate feature="group_registration">
     <div className="space-y-4">
       {/* Signup link banner */}
       <div
@@ -342,8 +351,32 @@ export function GroupTab({
         <Link2 className="w-4 h-4 flex-shrink-0" style={{ color: group.color }} />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{group.name} Signup Link</p>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{signupUrl}</p>
         </div>
+        {/* Form selector */}
+        {templates.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <FileText className="w-3.5 h-3.5 text-neutral-400" />
+            <select
+              value={group.applicationTemplateId ?? ''}
+              onChange={(e) => {
+                const formId = e.target.value || null;
+                const updated = { ...group, applicationTemplateId: formId };
+                onUpdate(updated);
+                api.put(`/people/groups/${group.id}`, { name: group.name, color: group.color, applicationTemplateId: formId }).catch(() => {});
+              }}
+              className="text-xs border border-neutral-300 dark:border-neutral-600 rounded-lg px-2 py-1.5 bg-white dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer"
+              style={{ borderColor: group.color + '70' }}
+            >
+              <option value="">No form linked</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {templates.length === 0 && !group.applicationTemplateId && (
+          <span className="text-xs text-neutral-400 dark:text-neutral-500 flex-shrink-0">No form linked</span>
+        )}
         <button
           onClick={() => navigator.clipboard.writeText(signupUrl).then(() => toast.success('Link copied!'))}
           className="px-3 py-1.5 text-xs font-semibold border rounded-lg flex-shrink-0 transition-opacity hover:opacity-70"
@@ -527,5 +560,6 @@ export function GroupTab({
         />
       )}
     </div>
+    </PlanGate>
   );
 }
