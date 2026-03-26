@@ -4,7 +4,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import Layout from '@/components/Layout';
 import Card from '@/components/Card';
-import Button from '@/components/Button';
+import FeedbackModal from '@/components/FeedbackModal';
 import {
   Users,
   Calendar,
@@ -15,8 +15,12 @@ import {
   CheckCircle,
   XCircle,
   AlertCircle,
-  Activity,
   MapPin,
+  UserPlus,
+  CalendarPlus,
+  ShieldCheck,
+  MessageSquare,
+  QrCode,
 } from 'lucide-react';
 import {
   BarChart,
@@ -86,10 +90,19 @@ function getStatusStyles(status: string) {
 }
 
 function SkeletonBlock({ h = 'h-20' }: { h?: string }) {
-  return <div className={`${h} bg-neutral-100 dark:bg-neutral-700 rounded-lg animate-pulse`} />;
+  return <div className={`${h} bg-neutral-100 dark:bg-neutral-700 rounded-xl animate-pulse`} />;
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
+
+const QUICK_ACTIONS = [
+  { label: 'Add Volunteer',        href: '/people',       icon: UserPlus,      color: 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400' },
+  { label: 'Create Event',         href: '/events',       icon: CalendarPlus,  color: 'bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400' },
+  { label: 'Review Applications',  href: '/applications', icon: FileText,      color: 'bg-warning-50 dark:bg-warning-900/20 text-warning-600 dark:text-warning-400' },
+  { label: 'Vetting Queue',        href: '/vetting',      icon: ShieldCheck,   color: 'bg-danger-50 dark:bg-danger-900/20 text-danger-600 dark:text-danger-400' },
+  { label: 'Send Message',         href: '/messages',     icon: MessageSquare, color: 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400' },
+  { label: 'Generate QR Code',     href: '/qr',           icon: QrCode,        color: 'bg-neutral-100 dark:bg-neutral-700/50 text-neutral-600 dark:text-neutral-300' },
+];
 
 export default function Dashboard() {
   const [stats, setStats]               = useState<ApiStats | null>(null);
@@ -97,6 +110,18 @@ export default function Dashboard() {
   const [applications, setApplications] = useState<DashApplication[]>([]);
   const [volunteers, setVolunteers]     = useState<DashVolunteer[]>([]);
   const [loading, setLoading]           = useState(true);
+  const [userName, setUserName]         = useState('');
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('vf_user');
+      if (stored) {
+        const parsed = JSON.parse(stored) as { name?: string };
+        if (parsed.name) setUserName(parsed.name.split(' ')[0]);
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,52 +201,79 @@ export default function Dashboard() {
         <title>Dashboard — VolunteerFlow</title>
         <meta name="description" content="VolunteerFlow management dashboard" />
       </Head>
-      <div className="space-y-6">
+      <div className="max-w-7xl mx-auto space-y-4">
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        {/* Welcome Header */}
+        <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">Dashboard</h1>
-            <p className="text-neutral-600 dark:text-neutral-400 mt-1">Welcome back! Here's what's happening today.</p>
+            <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
+              Welcome back{userName ? `, ${userName}` : ''}
+            </h1>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            </p>
           </div>
-          <Link href="/volunteers">
-            <Button>
-              <Activity className="w-4 h-4 mr-2" />
-              Manage Volunteers
-            </Button>
-          </Link>
+          <button
+            onClick={() => setIsFeedbackOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
+          >
+            <MessageSquare size={14} />
+            Feedback
+          </button>
+        </div>
+
+        {/* Quick Actions */}
+        <div>
+          <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-2">Quick Actions</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {QUICK_ACTIONS.map((action) => {
+              const Icon = action.icon;
+              return (
+                <Link
+                  key={action.href}
+                  href={action.href}
+                  className="flex flex-col items-center gap-2 p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-sm transition-all group"
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${action.color}`}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300 text-center leading-tight group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
+                    {action.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {statCards.map((stat, index) => {
             const Icon = stat.icon;
             const TrendIcon = stat.trend === 'up' ? TrendingUp : TrendingDown;
             return (
-              <Card key={index} className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-sm text-neutral-600 dark:text-neutral-400">{stat.title}</p>
-                    <p className="text-3xl font-bold text-neutral-900 dark:text-neutral-100 mt-1">{stat.value}</p>
+              <Card key={index} className="p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <div className={`w-11 h-11 ${stat.bgColor} rounded-xl flex items-center justify-center shrink-0`}>
+                    <Icon className={`w-5 h-5 ${stat.iconColor}`} />
                   </div>
-                  <div className={`w-12 h-12 ${stat.bgColor} rounded-lg flex items-center justify-center`}>
-                    <Icon className={`w-6 h-6 ${stat.iconColor}`} />
-                  </div>
+                  {!loading && (
+                    <TrendIcon className={`w-4 h-4 ${stat.subColor} mt-1`} />
+                  )}
                 </div>
-                <div className="flex items-center text-sm">
-                  {!loading && <TrendIcon className={`w-4 h-4 ${stat.subColor} mr-1`} />}
-                  <span className={`${loading ? 'text-neutral-400' : stat.subColor} font-medium`}>{stat.sub}</span>
-                </div>
+                <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tabular-nums">{stat.value}</p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{stat.title}</p>
+                <p className={`text-xs font-medium mt-1 ${loading ? 'text-neutral-400' : stat.subColor}`}>{stat.sub}</p>
               </Card>
             );
           })}
         </div>
 
         {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Application Status Pie */}
-          <Card className="p-6">
-            <div className="mb-6">
+          <Card className="p-5">
+            <div className="mb-4">
               <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Application Status</h2>
               <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">Current application distribution</p>
             </div>
@@ -265,8 +317,8 @@ export default function Dashboard() {
           </Card>
 
           {/* Events by Category */}
-          <Card className="p-6">
-            <div className="mb-6">
+          <Card className="p-5">
+            <div className="mb-4">
               <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Events by Category</h2>
               <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">Distribution across categories</p>
             </div>
@@ -295,11 +347,11 @@ export default function Dashboard() {
         </div>
 
         {/* Bottom Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
           {/* Upcoming Events */}
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Upcoming Events</h2>
               <Link href="/events" className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">View All</Link>
             </div>
@@ -310,28 +362,28 @@ export default function Dashboard() {
             ) : events.length === 0 ? (
               <p className="text-sm text-neutral-400 dark:text-neutral-500 py-8 text-center">No upcoming events</p>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {events.map((event) => (
-                  <div key={event.id} className="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:border-primary-300 dark:hover:border-primary-600 transition-colors">
-                    <h3 className="font-medium text-neutral-900 dark:text-neutral-100 mb-2">{event.title}</h3>
-                    <div className="space-y-2 text-sm">
+                  <div key={event.id} className="p-4 bg-neutral-50 dark:bg-neutral-700/50 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors">
+                    <h3 className="font-medium text-neutral-900 dark:text-neutral-100 mb-2 truncate">{event.title}</h3>
+                    <div className="space-y-1.5 text-sm">
                       {event.startDate && (
-                        <div className="flex items-center text-neutral-600 dark:text-neutral-400">
-                          <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
+                        <div className="flex items-center text-neutral-500 dark:text-neutral-400 gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 shrink-0" />
                           {new Date(event.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                         </div>
                       )}
                       {event.location && (
-                        <div className="flex items-center text-neutral-600 dark:text-neutral-400">
-                          <MapPin className="w-4 h-4 mr-2 flex-shrink-0" />
-                          {event.location}
+                        <div className="flex items-center text-neutral-500 dark:text-neutral-400 gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{event.location}</span>
                         </div>
                       )}
-                      <div className="flex items-center justify-between pt-2">
-                        <span className="text-neutral-600 dark:text-neutral-400">{event.participantCount}/{event.spotsAvailable} volunteers</span>
-                        <div className="w-24 bg-neutral-200 dark:bg-neutral-700 rounded-full h-2">
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-neutral-500 dark:text-neutral-400 text-xs">{event.participantCount}/{event.spotsAvailable} spots</span>
+                        <div className="w-20 bg-neutral-200 dark:bg-neutral-600 rounded-full h-1.5">
                           <div
-                            className="bg-primary-600 dark:bg-primary-500 h-2 rounded-full"
+                            className="bg-primary-500 h-1.5 rounded-full"
                             style={{ width: `${Math.min(100, (event.participantCount / Math.max(1, event.spotsAvailable)) * 100)}%` }}
                           />
                         </div>
@@ -344,8 +396,8 @@ export default function Dashboard() {
           </Card>
 
           {/* Recent Applications */}
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Recent Applications</h2>
               <Link href="/applications" className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">View All</Link>
             </div>
@@ -365,18 +417,16 @@ export default function Dashboard() {
                     : app.volunteerId;
                   const eventName = app.event?.title ?? app.eventId;
                   return (
-                    <div key={app.id} className="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:border-primary-300 dark:hover:border-primary-600 transition-colors">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-medium text-neutral-900 dark:text-neutral-100 truncate">{name}</h3>
-                          <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1 truncate">{eventName}</p>
-                        </div>
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ml-2 flex-shrink-0 ${statusStyle.bg} ${statusStyle.text}`}>
-                          <StatusIcon className="w-3 h-3 mr-1" />
+                    <div key={app.id} className="p-4 bg-neutral-50 dark:bg-neutral-700/50 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <h3 className="font-medium text-neutral-900 dark:text-neutral-100 truncate text-sm">{name}</h3>
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${statusStyle.bg} ${statusStyle.text}`}>
+                          <StatusIcon className="w-3 h-3" />
                           {app.status.charAt(0).toUpperCase() + app.status.slice(1).toLowerCase()}
                         </span>
                       </div>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{eventName}</p>
+                      <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1">
                         {new Date(app.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </p>
                     </div>
@@ -387,8 +437,8 @@ export default function Dashboard() {
           </Card>
 
           {/* Top Volunteers by Hours */}
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Top Volunteers</h2>
               <Link href="/people" className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">View All</Link>
             </div>
@@ -400,17 +450,15 @@ export default function Dashboard() {
             ) : volunteers.length === 0 ? (
               <p className="text-sm text-neutral-400 dark:text-neutral-500 py-8 text-center">No volunteers yet</p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {volunteers.map((v, index) => (
-                  <div key={v.id} className="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:border-primary-300 dark:hover:border-primary-600 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center font-bold text-primary-600 dark:text-primary-400 flex-shrink-0">
-                        {index + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-neutral-900 dark:text-neutral-100 truncate">{v.firstName} {v.lastName}</h3>
-                        <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-0.5">{fmtNum(v.hoursContributed)} hours</p>
-                      </div>
+                  <div key={v.id} className="flex items-center gap-3 p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors">
+                    <div className="w-8 h-8 bg-primary-100 dark:bg-primary-900/40 rounded-full flex items-center justify-center text-sm font-bold text-primary-600 dark:text-primary-400 shrink-0">
+                      {index + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">{v.firstName} {v.lastName}</p>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">{fmtNum(v.hoursContributed)} hrs</p>
                     </div>
                   </div>
                 ))}
@@ -420,6 +468,7 @@ export default function Dashboard() {
 
         </div>
       </div>
+      <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
     </Layout>
   );
 }

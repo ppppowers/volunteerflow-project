@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
 import { api } from '@/lib/api';
-import { BookOpen, HelpCircle, ChevronDown, ChevronUp, Tag } from 'lucide-react';
+import { BookOpen, HelpCircle, ChevronDown, ChevronUp, Tag, MessageSquare } from 'lucide-react';
+import FeedbackModal from '@/components/FeedbackModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -141,6 +142,7 @@ export default function HelpPage() {
   const [items, setItems] = useState<HelpItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
   useEffect(() => {
     // api.get already unwraps { success, data } — returns HelpItem[] directly
@@ -159,13 +161,22 @@ export default function HelpPage() {
 
       <div className="max-w-2xl mx-auto px-4 py-8">
         {/* Page header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
-            Help & Documentation
-          </h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-            Guides and answers to help you get the most out of VolunteerFlow.
-          </p>
+        <div className="flex items-start justify-between mb-8">
+          <div>
+            <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
+              Help & Documentation
+            </h1>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+              Guides and answers to help you get the most out of VolunteerFlow.
+            </p>
+          </div>
+          <button
+            onClick={() => setIsFeedbackOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
+          >
+            <MessageSquare size={14} />
+            Feedback
+          </button>
         </div>
 
         {/* States */}
@@ -193,6 +204,7 @@ export default function HelpPage() {
           </div>
         )}
       </div>
+      <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
     </Layout>
   );
 }
