@@ -9,5 +9,6 @@ module.exports = function createStaffRouter(pool) {
   router.use('/audit', require('./audit')(pool));
   router.use('/employees', require('./employees')(pool));
   router.use('/roles', require('./roles')(pool));
+  router.use('/help', require('./help')(pool));
   return router;
 };

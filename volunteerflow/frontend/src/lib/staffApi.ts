@@ -1,4 +1,4 @@
-const BASE = '/api/staff';
+const BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'}/staff`;
 
 export class StaffApiError extends Error {
   status: number;
@@ -54,7 +54,8 @@ async function staffFetch(path: string, init: RequestInit = {}): Promise<unknown
 
 export const staffApi = {
   get:    (path: string)                    => staffFetch(path),
-  post:   (path: string, body: unknown)     => staffFetch(path, { method: 'POST',  body: JSON.stringify(body) }),
-  patch:  (path: string, body: unknown)     => staffFetch(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  post:   (path: string, body: unknown)     => staffFetch(path, { method: 'POST',   body: JSON.stringify(body) }),
+  put:    (path: string, body: unknown)     => staffFetch(path, { method: 'PUT',    body: JSON.stringify(body) }),
+  patch:  (path: string, body: unknown)     => staffFetch(path, { method: 'PATCH',  body: JSON.stringify(body) }),
   delete: (path: string)                    => staffFetch(path, { method: 'DELETE' }),
 };

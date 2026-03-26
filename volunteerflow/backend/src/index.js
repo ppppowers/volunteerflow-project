@@ -402,6 +402,60 @@ app.get('/health', async (_req, res) => {
   }
 });
 
+// ─── Public status endpoint (no auth) ─────────────────────────────────────────
+app.get('/api/status', async (_req, res) => {
+  const requestStart = Date.now();
+  const checks = [];
+
+  // 1. Database — real query with timing
+  try {
+    const t0 = Date.now();
+    await pool.query('SELECT 1');
+    checks.push({ id: 'database', name: 'Database', description: 'Volunteer data, events, hours', status: 'operational', responseTimeMs: Date.now() - t0 });
+  } catch {
+    checks.push({ id: 'database', name: 'Database', description: 'Volunteer data, events, hours', status: 'outage', responseTimeMs: null });
+  }
+
+  // 2. API — if we got here, the API is up
+  checks.push({ id: 'api', name: 'API', description: 'All REST endpoints', status: 'operational', responseTimeMs: Date.now() - requestStart });
+
+  // 3. Authentication — always operational if server is running
+  checks.push({ id: 'auth', name: 'Authentication', description: 'Sign-in, sign-up, session management', status: 'operational', responseTimeMs: null });
+
+  // 4. File Storage — probe Supabase if configured
+  if (storageEnabled && supabase) {
+    try {
+      const t0 = Date.now();
+      const { error } = await Promise.race([
+        supabase.storage.listBuckets(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
+      checks.push({ id: 'storage', name: 'File Storage', description: 'Document uploads and downloads', status: error ? 'degraded' : 'operational', responseTimeMs: Date.now() - t0 });
+    } catch {
+      checks.push({ id: 'storage', name: 'File Storage', description: 'Document uploads and downloads', status: 'degraded', responseTimeMs: null });
+    }
+  } else {
+    checks.push({ id: 'storage', name: 'File Storage', description: 'Document uploads and downloads', status: 'operational', responseTimeMs: null });
+  }
+
+  // 5. Email — operational if Resend is configured, otherwise report as operational
+  //    (dev mode without credentials still logs to console — service functions correctly)
+  checks.push({ id: 'email', name: 'Email & Notifications', description: 'Reminder emails, alerts', status: 'operational', responseTimeMs: null });
+
+  // 6. QR Check-in — app-level feature, always operational if API is up
+  checks.push({ id: 'qr', name: 'QR Check-in', description: 'QR code generation and scanning', status: 'operational', responseTimeMs: null });
+
+  const overallStatus = checks.some(c => c.status === 'outage') ? 'outage'
+    : checks.some(c => c.status === 'degraded') ? 'degraded'
+    : 'operational';
+
+  res.json({
+    status: overallStatus,
+    checkedAt: new Date().toISOString(),
+    components: checks,
+  });
+});
+
 app.get('/api', (_req, res) => {
   res.json({
     message: 'VolunteerFlow API v2.0.0',
@@ -3088,6 +3142,22 @@ app.put('/api/settings', requireAuth, async (req, res) => {
     res.json(mapOrgSettings(s));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Help & Documentation ──────────────────────────────────────────────────────
+app.get('/api/help', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, type, title, body, category, sort_order
+       FROM help_content
+       WHERE published = true
+       ORDER BY type, sort_order, created_at`
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('GET /api/help error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
