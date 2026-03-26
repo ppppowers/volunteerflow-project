@@ -688,6 +688,29 @@ app.delete('/api/auth/2fa', requireAuth, async (req, res) => {
   }
 });
 
+// ===== FEEDBACK =====
+app.post('/api/feedback', requireAuth, async (req, res) => {
+  try {
+    const { type, message } = req.body;
+    if (!type || !['suggestion', 'feedback'].includes(type)) {
+      return res.status(400).json({ success: false, error: 'type must be suggestion or feedback' });
+    }
+    if (!message || !message.trim()) {
+      return res.status(400).json({ success: false, error: 'message is required' });
+    }
+    const orgRow = await pool.query('SELECT org_name FROM users WHERE id = $1', [req.orgId]);
+    const orgName = orgRow.rows[0]?.org_name || '';
+    await pool.query(
+      'INSERT INTO feedback (id, org_id, org_name, type, message) VALUES ($1,$2,$3,$4,$5)',
+      [generateId(), req.orgId, orgName, type, message.trim()]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[POST /api/feedback]', err.message);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
 // ===== BILLING =====
 const VALID_PLANS = ['discover', 'grow', 'enterprise'];
 const VALID_CYCLES = ['monthly', 'yearly'];
