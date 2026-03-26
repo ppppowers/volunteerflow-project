@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: '/staff', label: 'Home', icon: '🏠' },
   { href: '/staff/orgs', label: 'Organizations', icon: '🏢' },
   { href: '/staff/audit', label: 'Audit Log', icon: '📋' },
+  { href: '/staff/feedback', label: 'Feedback', icon: '💬' },
   { href: '/staff/employees', label: 'Employees', icon: '👥' },
   { href: '/staff/roles', label: 'Roles', icon: '🔑' },
 ];
