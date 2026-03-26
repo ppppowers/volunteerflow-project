@@ -47,6 +47,7 @@ function FaqSection({ items }: { items: HelpItem[] }) {
                 onClick={() => toggle(item.id)}
                 className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"
                 aria-expanded={isOpen}
+                aria-controls={`faq-panel-${item.id}`}
               >
                 <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 pr-4">
                   {item.title}
@@ -58,7 +59,7 @@ function FaqSection({ items }: { items: HelpItem[] }) {
                 </span>
               </button>
               {isOpen && (
-                <div className="px-5 pb-4 text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed border-t border-neutral-100 dark:border-neutral-800 pt-3 whitespace-pre-wrap">
+                <div id={`faq-panel-${item.id}`} className="px-5 pb-4 text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed border-t border-neutral-100 dark:border-neutral-800 pt-3 whitespace-pre-wrap">
                   {item.body}
                 </div>
               )}
@@ -102,6 +103,7 @@ function ArticlesSection({ items }: { items: HelpItem[] }) {
                 onClick={() => toggle(item.id)}
                 className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"
                 aria-expanded={isOpen}
+                aria-controls={`article-panel-${item.id}`}
               >
                 <div className="flex-1 min-w-0 pr-4">
                   <span className="block text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -121,7 +123,7 @@ function ArticlesSection({ items }: { items: HelpItem[] }) {
                 </span>
               </button>
               {isOpen && (
-                <div className="px-5 pb-5 border-t border-neutral-100 dark:border-neutral-800 pt-4 text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed whitespace-pre-wrap">
+                <div id={`article-panel-${item.id}`} className="px-5 pb-5 border-t border-neutral-100 dark:border-neutral-800 pt-4 text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed whitespace-pre-wrap">
                   {item.body}
                 </div>
               )}

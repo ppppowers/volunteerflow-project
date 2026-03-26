@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
@@ -64,7 +65,14 @@ export default function Sidebar() {
     >
       {/* Logo */}
       <div className="px-5 pt-5 pb-3">
-        <img src="/vf-logo-full.png" className="w-full h-auto" alt="VolunteerFlow" />
+        <Image
+          src="/vf-logo-full.png"
+          alt="VolunteerFlow"
+          width={180}
+          height={40}
+          className="w-full h-auto"
+          priority
+        />
       </div>
 
       {/* Navigation */}
