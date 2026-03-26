@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import { useIdleTimer } from '@/hooks/useIdleTimer';
-import { IdleWarningModal } from '@/components/IdleWarningModal';
+import IdleWarningModal from '@/components/IdleWarningModal';
 
 interface LayoutProps {
   children: ReactNode;

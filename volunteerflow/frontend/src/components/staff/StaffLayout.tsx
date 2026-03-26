@@ -5,7 +5,7 @@ import { StaffSidebar } from './StaffSidebar';
 import { StaffHeader } from './StaffHeader';
 import { Permission } from '../../lib/staffPermissions';
 import { useIdleTimer } from '@/hooks/useIdleTimer';
-import { IdleWarningModal } from '@/components/IdleWarningModal';
+import IdleWarningModal from '@/components/IdleWarningModal';
 
 interface Props {
   children: React.ReactNode;
