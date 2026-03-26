@@ -78,13 +78,6 @@ if (!process.env.STAFF_JWT_SECRET || process.env.STAFF_JWT_SECRET.length < 32) {
   process.exit(1);
 }
 
-// Initialize database on startup
-initializeDatabase()
-  .catch((error) => {
-    console.error('Failed to initialize database:', error);
-    process.exit(1);
-  });
-
 // ===== MIDDLEWARE =====
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
@@ -142,22 +135,49 @@ function parseUserAgent(ua) {
   return `${os} — ${browser}`;
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const h = req.headers.authorization;
   if (!h || !h.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
   try {
     req.user = jwt.verify(h.slice(7), JWT_SECRET);
+    req.orgId = req.user.orgId ?? req.user.sub;
     if (req.user.sid) {
       setImmediate(() =>
         pool.query('UPDATE user_sessions SET last_seen = NOW() WHERE id = $1', [req.user.sid]).catch(() => {})
       );
     }
     next();
-  } catch {
-    return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+  } catch (err) {
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+    return res.status(500).json({ success: false, error: 'Server error' });
   }
+}
+
+// ─── Plan gate middleware ──────────────────────────────────────────────────────
+const PLAN_ORDER = ['discover', 'grow', 'enterprise'];
+
+function requirePlan(...requiredPlans) {
+  const minLevel = Math.min(...requiredPlans.map(p => PLAN_ORDER.indexOf(p)));
+  return async (req, res, next) => {
+    try {
+      const { rows } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.sub]);
+      const userPlan = rows[0]?.plan ?? 'discover';
+      const userLevel = PLAN_ORDER.indexOf(userPlan);
+      if (userLevel >= minLevel) return next();
+      return res.status(403).json({
+        success: false,
+        error: 'This feature requires a higher plan',
+        requiredPlan: PLAN_ORDER[minLevel],
+      });
+    } catch (err) {
+      console.error('requirePlan error:', err.message);
+      return res.status(500).json({ success: false, error: 'Plan check failed' });
+    }
+  };
 }
 
 // ===== HELPERS =====
@@ -187,14 +207,15 @@ function logAudit({ req, category, verb, resource, detail = '' }) {
   const userId   = req?.user?.sub        || '';
   const userName = req?.user?.fullName   || 'System';
   const userRole = req?.user?.role       || 'system';
+  const orgId    = req?.orgId            || req?.user?.sub || '';
   const ip       = req
     ? (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim()
     : '';
   const id = `aud_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   pool.query(
-    `INSERT INTO audit_logs (id, user_id, user_name, user_role, category, verb, resource, detail, ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [id, userId, userName, userRole, category, verb, resource, detail.slice(0, 500), ip]
+    `INSERT INTO audit_logs (id, org_id, user_id, user_name, user_role, category, verb, resource, detail, ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, orgId, userId, userName, userRole, category, verb, resource, detail.slice(0, 500), ip]
   ).catch((err) => console.error('[audit] write error:', err.message));
 }
 
@@ -275,6 +296,21 @@ function mapApplication(r) {
 
 function mapFolder(r) {
   return { id: r.id, name: r.name, color: r.color };
+}
+
+function mapFormSubmission(r) {
+  return {
+    id: r.id,
+    templateId: r.template_id,
+    templateName: r.template_name,
+    applicantType: r.applicant_type,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    answers: r.answers ?? {},
+    status: r.status,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+  };
 }
 
 function mapFile(r) {
@@ -386,12 +422,14 @@ app.post('/api/auth/register', writeLimiter, async (req, res) => {
     const hash = await bcrypt.hash(password, 12);
     const id = generateId();
     const { rows } = await pool.query(
-      'INSERT INTO users (id, email, password_hash, full_name, org_name) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, full_name, org_name, role',
+      'INSERT INTO users (id, email, password_hash, full_name, org_name, org_id) VALUES ($1, $2, $3, $4, $5, $1) RETURNING id, email, full_name, org_name, role, org_id',
       [id, email.trim().toLowerCase(), hash, fullName.trim(), (orgName || '').trim()]
     );
     const user = rows[0];
+    // Also create a default org_settings row for this new org
+    pool.query("INSERT INTO org_settings (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [user.id]).catch(() => {});
     const token = jwt.sign(
-      { sub: user.id, email: user.email, fullName: user.full_name, role: user.role },
+      { sub: user.id, email: user.email, fullName: user.full_name, role: user.role, orgId: user.id },
       JWT_SECRET, { expiresIn: JWT_EXPIRES_IN }
     );
     res.status(201).json({
@@ -414,7 +452,7 @@ app.post('/api/auth/login', writeLimiter, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Email and password are required' });
     }
     const { rows } = await pool.query(
-      'SELECT id, email, password_hash, full_name, org_name, role FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, full_name, org_name, role, org_id FROM users WHERE email = $1',
       [email.trim().toLowerCase()]
     );
     const user = rows[0];
@@ -427,9 +465,10 @@ app.post('/api/auth/login', writeLimiter, async (req, res) => {
       [sid, user.id, req.headers['user-agent'] || '', req.ip || '']
     );
     const token = jwt.sign(
-      { sub: user.id, email: user.email, fullName: user.full_name, role: user.role, sid },
+      { sub: user.id, email: user.email, fullName: user.full_name, role: user.role, sid, orgId: user.org_id || user.id },
       JWT_SECRET, { expiresIn: JWT_EXPIRES_IN }
     );
+    pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]).catch(() => {});
     logAudit({ req, category: 'auth', verb: 'login', resource: 'System',
       detail: `Login from ${req.headers['user-agent']?.slice(0, 80) || 'unknown client'}` });
     res.json({
@@ -862,7 +901,7 @@ app.get('/api/data/export', requireAuth, async (req, res) => {
     let csv, filename;
     switch (type) {
       case 'volunteers': {
-        const { rows } = await pool.query('SELECT * FROM volunteers ORDER BY created_at');
+        const { rows } = await pool.query('SELECT * FROM volunteers WHERE org_id = $1 ORDER BY created_at', [req.orgId]);
         const cols = ['id','first_name','last_name','email','phone','location','join_date','status','hours_contributed','created_at'];
         csv = toCSV(rows, cols);
         filename = `volunteers-${Date.now()}.csv`;
@@ -870,7 +909,8 @@ app.get('/api/data/export', requireAuth, async (req, res) => {
       }
       case 'events': {
         const { rows } = await pool.query(
-          'SELECT id,title,category,location,start_date,end_date,status,spots_available,max_volunteers,created_at FROM events ORDER BY created_at'
+          'SELECT id,title,category,location,start_date,end_date,status,spots_available,max_volunteers,created_at FROM events WHERE org_id = $1 ORDER BY created_at',
+          [req.orgId]
         );
         const cols = ['id','title','category','location','start_date','end_date','status','spots_available','max_volunteers','created_at'];
         csv = toCSV(rows, cols);
@@ -884,8 +924,9 @@ app.get('/api/data/export', requireAuth, async (req, res) => {
           FROM applications a
           JOIN volunteers v ON a.volunteer_id = v.id
           JOIN events e ON a.event_id = e.id
+          WHERE a.org_id = $1
           ORDER BY a.created_at
-        `);
+        `, [req.orgId]);
         const cols = ['id','volunteer_name','volunteer_email','event_title','status','vetting_stage','message','rating','created_at'];
         csv = toCSV(rows, cols);
         filename = `applications-${Date.now()}.csv`;
@@ -893,7 +934,8 @@ app.get('/api/data/export', requireAuth, async (req, res) => {
       }
       case 'hours': {
         const { rows } = await pool.query(
-          'SELECT id,first_name,last_name,email,hours_contributed,status,created_at FROM volunteers ORDER BY hours_contributed DESC'
+          'SELECT id,first_name,last_name,email,hours_contributed,status,created_at FROM volunteers WHERE org_id = $1 ORDER BY hours_contributed DESC',
+          [req.orgId]
         );
         const cols = ['id','first_name','last_name','email','hours_contributed','status','created_at'];
         csv = toCSV(rows, cols);
@@ -902,11 +944,11 @@ app.get('/api/data/export', requireAuth, async (req, res) => {
       }
       case 'full': {
         const [vols, evts, apps, mbrs, tcomp] = await Promise.all([
-          pool.query('SELECT * FROM volunteers ORDER BY created_at'),
-          pool.query('SELECT * FROM events ORDER BY created_at'),
-          pool.query('SELECT * FROM applications ORDER BY created_at'),
-          pool.query('SELECT * FROM members ORDER BY created_at').catch(() => ({ rows: [] })),
-          pool.query('SELECT * FROM training_completions ORDER BY created_at').catch(() => ({ rows: [] })),
+          pool.query('SELECT * FROM volunteers WHERE org_id = $1 ORDER BY created_at', [req.orgId]),
+          pool.query('SELECT * FROM events WHERE org_id = $1 ORDER BY created_at', [req.orgId]),
+          pool.query('SELECT * FROM applications WHERE org_id = $1 ORDER BY created_at', [req.orgId]),
+          pool.query('SELECT * FROM members WHERE org_id = $1 ORDER BY created_at', [req.orgId]).catch(() => ({ rows: [] })),
+          pool.query('SELECT * FROM training_completions WHERE org_id = $1 ORDER BY created_at', [req.orgId]).catch(() => ({ rows: [] })),
         ]);
         const bundle = {
           exportedAt: new Date().toISOString(),
@@ -937,7 +979,7 @@ app.get('/api/data/retention', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT retention_volunteers, retention_events, retention_applications FROM org_settings WHERE id = $1',
-      ['default']
+      [req.orgId]
     );
     const r = rows[0] || {};
     res.json({ success: true, data: {
@@ -961,12 +1003,12 @@ app.put('/api/data/retention', requireAuth, async (req, res) => {
   try {
     await pool.query(`
       INSERT INTO org_settings (id, retention_volunteers, retention_events, retention_applications)
-      VALUES ('default', $1, $2, $3)
+      VALUES ($1, $2, $3, $4)
       ON CONFLICT (id) DO UPDATE SET
         retention_volunteers   = EXCLUDED.retention_volunteers,
         retention_events       = EXCLUDED.retention_events,
         retention_applications = EXCLUDED.retention_applications
-    `, [volunteers || '12', events || '36', applications || '24']);
+    `, [req.orgId, volunteers || '12', events || '36', applications || '24']);
     logAudit({ req, category: 'data', verb: 'update', resource: 'Retention', detail: `vol:${volunteers} ev:${events} app:${applications}` });
     res.json({ success: true });
   } catch (err) {
@@ -978,7 +1020,7 @@ app.put('/api/data/retention', requireAuth, async (req, res) => {
 // Danger zone: wipe all application records
 app.delete('/api/data/applications', requireAuth, async (req, res) => {
   try {
-    const { rowCount } = await pool.query('DELETE FROM applications');
+    const { rowCount } = await pool.query('DELETE FROM applications WHERE org_id = $1', [req.orgId]);
     logAudit({ req, category: 'data', verb: 'delete', resource: 'Applications', detail: `${rowCount} records wiped` });
     res.json({ success: true, deleted: rowCount });
   } catch (err) {
@@ -990,22 +1032,22 @@ app.delete('/api/data/applications', requireAuth, async (req, res) => {
 // Danger zone: wipe entire org data
 app.delete('/api/data/account', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM applications');
-    await pool.query('DELETE FROM events');
-    await pool.query('DELETE FROM volunteers');
-    await pool.query('DELETE FROM members');
-    await pool.query('DELETE FROM employees');
-    await pool.query('DELETE FROM files');
-    await pool.query('DELETE FROM folders');
-    await pool.query('DELETE FROM training_completions');
-    await pool.query('DELETE FROM training_assignments');
-    await pool.query('DELETE FROM training_courses');
+    await pool.query('DELETE FROM applications WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM events WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM volunteers WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM members WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM employees WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM files WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM folders WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM training_completions WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM training_assignments WHERE org_id = $1', [req.orgId]);
+    await pool.query('DELETE FROM training_courses WHERE org_id = $1', [req.orgId]);
     await pool.query('DELETE FROM invoices WHERE user_id = $1', [req.user.sub]);
     await pool.query(`UPDATE users SET plan = 'discover', billing_cycle = 'monthly', plan_updated_at = NOW(),
       stripe_subscription_id = NULL, paypal_subscription_id = NULL, subscription_status = NULL, billing_provider = NULL
       WHERE id = $1`, [req.user.sub]);
     await pool.query(`UPDATE org_settings SET org_name='', org_email='', phone='', address='', description='',
-      logo_url='', logo_base64='', tax_id='', portal_name='', portal_subdomain='', welcome_heading='', welcome_subtext='', footer_text='' WHERE id='default'`);
+      logo_url='', logo_base64='', tax_id='', portal_name='', portal_subdomain='', welcome_heading='', welcome_subtext='', footer_text='' WHERE id=$1`, [req.orgId]);
     logAudit({ req, category: 'data', verb: 'delete', resource: 'Organization', detail: 'Full org wipe' });
     res.json({ success: true });
   } catch (err) {
@@ -1024,9 +1066,9 @@ app.get('/api/volunteers', requireAuth, async (req, res) => {
     const limit = parseIntParam(req.query.limit, 10, 1, 100);
     const { search, status } = req.query;
 
-    const conditions = [];
-    const params = [];
-    let idx = 1;
+    const conditions = [`org_id = $1`];
+    const params = [req.orgId];
+    let idx = 2;
 
     if (search && typeof search === 'string') {
       const s = `%${search.toLowerCase()}%`;
@@ -1039,7 +1081,7 @@ app.get('/api/volunteers', requireAuth, async (req, res) => {
       params.push(status);
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const where = `WHERE ${conditions.join(' AND ')}`;
     const countRes = await pool.query(`SELECT COUNT(*) FROM volunteers ${where}`, params);
     const total = parseInt(countRes.rows[0].count, 10);
 
@@ -1061,7 +1103,7 @@ app.get('/api/volunteers', requireAuth, async (req, res) => {
 
 app.get('/api/volunteers/:id', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM volunteers WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query('SELECT * FROM volunteers WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!rows.length) return res.status(404).json({ success: false, error: 'Volunteer not found' });
     res.json({ success: true, data: mapVolunteer(rows[0]) });
   } catch (err) {
@@ -1090,10 +1132,11 @@ app.post('/api/volunteers', requireAuth, async (req, res) => {
     const id = generateId();
     const { rows } = await pool.query(
       `INSERT INTO volunteers
-         (id, first_name, last_name, email, phone, location, join_date, avatar, skills, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+         (id, org_id, first_name, last_name, email, phone, location, join_date, avatar, skills, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
         id,
+        req.orgId,
         firstName.trim(),
         lastName.trim(),
         email.trim().toLowerCase(),
@@ -1118,7 +1161,7 @@ app.post('/api/volunteers', requireAuth, async (req, res) => {
 
 app.put('/api/volunteers/:id', requireAuth, async (req, res) => {
   try {
-    const existing = await pool.query('SELECT id FROM volunteers WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT id FROM volunteers WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!existing.rows.length) return res.status(404).json({ success: false, error: 'Volunteer not found' });
 
     const updates = pick(req.body, VOLUNTEER_UPDATABLE);
@@ -1133,8 +1176,9 @@ app.put('/api/volunteers/:id', requireAuth, async (req, res) => {
     if (!sets.length) return res.status(400).json({ success: false, error: 'No valid fields to update' });
 
     params.push(req.params.id);
+    params.push(req.orgId);
     const { rows } = await pool.query(
-      `UPDATE volunteers SET ${sets.join(', ')} WHERE id = $${nextIdx} RETURNING *`,
+      `UPDATE volunteers SET ${sets.join(', ')} WHERE id = $${nextIdx} AND org_id = $${nextIdx + 1} RETURNING *`,
       params
     );
     const v = rows[0];
@@ -1151,8 +1195,8 @@ app.put('/api/volunteers/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/volunteers/:id', requireAuth, async (req, res) => {
   try {
-    const { rows: volRows } = await pool.query('SELECT first_name, last_name FROM volunteers WHERE id = $1', [req.params.id]);
-    const { rowCount } = await pool.query('DELETE FROM volunteers WHERE id = $1', [req.params.id]);
+    const { rows: volRows } = await pool.query('SELECT first_name, last_name FROM volunteers WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    const { rowCount } = await pool.query('DELETE FROM volunteers WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!rowCount) return res.status(404).json({ success: false, error: 'Volunteer not found' });
     if (volRows.length) {
       logAudit({ req, category: 'volunteer', verb: 'deleted',
@@ -1180,9 +1224,9 @@ app.get('/api/events', requireAuth, async (req, res) => {
     const limit = parseIntParam(req.query.limit, 10, 1, 100);
     const { status, category } = req.query;
 
-    const conditions = [];
-    const params = [];
-    let idx = 1;
+    const conditions = [`e.org_id = $1`];
+    const params = [req.orgId];
+    let idx = 2;
 
     if (status && typeof status === 'string') {
       conditions.push(`e.status = $${idx++}`);
@@ -1193,7 +1237,7 @@ app.get('/api/events', requireAuth, async (req, res) => {
       params.push(category);
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const where = `WHERE ${conditions.join(' AND ')}`;
     const countRes = await pool.query(`SELECT COUNT(*) FROM events e ${where}`, params);
     const total = parseInt(countRes.rows[0].count, 10);
 
@@ -1215,12 +1259,12 @@ app.get('/api/events', requireAuth, async (req, res) => {
 
 app.get('/api/events/:id', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query(`${EVENTS_LIST_SQL} WHERE e.id = $1`, [req.params.id]);
+    const { rows } = await pool.query(`${EVENTS_LIST_SQL} WHERE e.id = $1 AND e.org_id = $2`, [req.params.id, req.orgId]);
     if (!rows.length) return res.status(404).json({ success: false, error: 'Event not found' });
 
     const appRows = await pool.query(
-      'SELECT * FROM applications WHERE event_id = $1',
-      [req.params.id]
+      'SELECT * FROM applications WHERE event_id = $1 AND org_id = $2',
+      [req.params.id, req.orgId]
     );
 
     const event = mapEvent(rows[0]);
@@ -1263,15 +1307,16 @@ app.post('/api/events', requireAuth, async (req, res) => {
 
     const { rows } = await pool.query(
       `INSERT INTO events
-         (id, title, description, category, location, address, start_date, end_date,
+         (id, org_id, title, description, category, location, address, start_date, end_date,
           spots_available, max_volunteers, status, visibility, tags, cover_image, images,
           contact_name, contact_email, contact_phone, notes, registration_deadline,
           shifts, eligibility, created_at, updated_at)
        VALUES
-         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
        RETURNING *`,
       [
         id,
+        req.orgId,
         title.trim(),
         typeof description === 'string' ? description.trim() : '',
         category.trim(),
@@ -1309,7 +1354,7 @@ app.post('/api/events', requireAuth, async (req, res) => {
 
 app.put('/api/events/:id', requireAuth, async (req, res) => {
   try {
-    const existing = await pool.query('SELECT id, status, title FROM events WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT id, status, title FROM events WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!existing.rows.length) return res.status(404).json({ success: false, error: 'Event not found' });
 
     const updates = pick(req.body, EVENT_UPDATABLE);
@@ -1324,9 +1369,10 @@ app.put('/api/events/:id', requireAuth, async (req, res) => {
     sets.push(`updated_at = $${nextIdx}`);
     params.push(new Date().toISOString().split('T')[0]);
     params.push(req.params.id);
+    params.push(req.orgId);
 
     const { rows } = await pool.query(
-      `UPDATE events SET ${sets.join(', ')} WHERE id = $${nextIdx + 1} RETURNING *`,
+      `UPDATE events SET ${sets.join(', ')} WHERE id = $${nextIdx + 1} AND org_id = $${nextIdx + 2} RETURNING *`,
       params
     );
     // Notify registered volunteers when event is cancelled (non-blocking)
@@ -1335,11 +1381,11 @@ app.put('/api/events/:id', requireAuth, async (req, res) => {
       pool.query(
         `SELECT DISTINCT v.email, v.phone FROM volunteers v
          JOIN applications a ON a.volunteer_id = v.id
-         WHERE a.event_id = $1 AND a.status NOT IN ('REJECTED')`,
-        [req.params.id]
+         WHERE a.event_id = $1 AND a.org_id = $2 AND a.status NOT IN ('REJECTED')`,
+        [req.params.id, req.orgId]
       ).then(({ rows: vols }) => {
         if (vols.length) {
-          return getOrgSettings().then((cfg) =>
+          return getOrgSettings(req.orgId).then((cfg) =>
             dispatchBulk('email', vols,
               `Event cancelled: ${eventTitle}`,
               `We regret to inform you that "${eventTitle}" has been cancelled. We apologise for any inconvenience.`,
@@ -1362,8 +1408,8 @@ app.put('/api/events/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/events/:id', requireAuth, async (req, res) => {
   try {
-    const { rows: evRows } = await pool.query('SELECT title FROM events WHERE id = $1', [req.params.id]);
-    const { rowCount } = await pool.query('DELETE FROM events WHERE id = $1', [req.params.id]);
+    const { rows: evRows } = await pool.query('SELECT title FROM events WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    const { rowCount } = await pool.query('DELETE FROM events WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!rowCount) return res.status(404).json({ success: false, error: 'Event not found' });
     if (evRows.length) {
       logAudit({ req, category: 'event', verb: 'deleted',
@@ -1386,15 +1432,15 @@ const APPS_JOIN_SQL = `
   LEFT JOIN events e ON e.id = a.event_id
 `;
 
-app.get('/api/applications', requireAuth, async (req, res) => {
+app.get('/api/applications', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const page = parseIntParam(req.query.page, 1, 1);
     const limit = parseIntParam(req.query.limit, 10, 1, 100);
     const { status, eventId, volunteerId } = req.query;
 
-    const conditions = [];
-    const params = [];
-    let idx = 1;
+    const conditions = [`a.org_id = $1`];
+    const params = [req.orgId];
+    let idx = 2;
 
     if (status && typeof status === 'string') {
       conditions.push(`a.status = $${idx++}`);
@@ -1409,7 +1455,7 @@ app.get('/api/applications', requireAuth, async (req, res) => {
       params.push(volunteerId);
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const where = `WHERE ${conditions.join(' AND ')}`;
     const countRes = await pool.query(`SELECT COUNT(*) FROM applications a ${where}`, params);
     const total = parseInt(countRes.rows[0].count, 10);
 
@@ -1429,7 +1475,7 @@ app.get('/api/applications', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/applications', requireAuth, async (req, res) => {
+app.post('/api/applications', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { volunteerId, eventId, message } = req.body;
     if (!volunteerId || typeof volunteerId !== 'string') {
@@ -1439,16 +1485,16 @@ app.post('/api/applications', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'eventId is required' });
     }
 
-    const volCheck = await pool.query('SELECT id FROM volunteers WHERE id = $1', [volunteerId]);
+    const volCheck = await pool.query('SELECT id FROM volunteers WHERE id = $1 AND org_id = $2', [volunteerId, req.orgId]);
     if (!volCheck.rows.length) return res.status(400).json({ success: false, error: 'Volunteer not found' });
 
-    const evCheck = await pool.query('SELECT id FROM events WHERE id = $1', [eventId]);
+    const evCheck = await pool.query('SELECT id FROM events WHERE id = $1 AND org_id = $2', [eventId, req.orgId]);
     if (!evCheck.rows.length) return res.status(400).json({ success: false, error: 'Event not found' });
 
     const id = generateId();
     const { rows } = await pool.query(
-      'INSERT INTO applications (id, volunteer_id, event_id, message) VALUES ($1, $2, $3, $4) RETURNING *',
-      [id, volunteerId, eventId, typeof message === 'string' ? message.trim().slice(0, 2000) : '']
+      'INSERT INTO applications (id, org_id, volunteer_id, event_id, message) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [id, req.orgId, volunteerId, eventId, typeof message === 'string' ? message.trim().slice(0, 2000) : '']
     );
     // Lookup volunteer name for audit
     pool.query('SELECT first_name, last_name FROM volunteers WHERE id = $1', [volunteerId])
@@ -1470,9 +1516,9 @@ app.post('/api/applications', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/applications/:id', requireAuth, async (req, res) => {
+app.put('/api/applications/:id', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
-    const existing = await pool.query('SELECT id, volunteer_id, status FROM applications WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT id, volunteer_id, status FROM applications WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!existing.rows.length) return res.status(404).json({ success: false, error: 'Application not found' });
 
     const updates = pick(req.body, APPLICATION_UPDATABLE);
@@ -1491,8 +1537,9 @@ app.put('/api/applications/:id', requireAuth, async (req, res) => {
     if (!sets.length) return res.status(400).json({ success: false, error: 'No valid fields to update' });
 
     params.push(req.params.id);
+    params.push(req.orgId);
     const { rows } = await pool.query(
-      `UPDATE applications SET ${sets.join(', ')} WHERE id = $${nextIdx} RETURNING *`,
+      `UPDATE applications SET ${sets.join(', ')} WHERE id = $${nextIdx} AND org_id = $${nextIdx + 1} RETURNING *`,
       params
     );
     // Audit status change
@@ -1523,9 +1570,9 @@ app.put('/api/applications/:id', requireAuth, async (req, res) => {
 });
 
 // ===== FOLDERS CRUD =====
-app.get('/api/folders', requireAuth, async (req, res) => {
+app.get('/api/folders', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM folders ORDER BY name ASC');
+    const { rows } = await pool.query('SELECT * FROM folders WHERE org_id = $1 ORDER BY name ASC', [req.orgId]);
     res.json({ success: true, data: rows.map(mapFolder) });
   } catch (err) {
     console.error('GET /api/folders error:', err.message);
@@ -1533,7 +1580,7 @@ app.get('/api/folders', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/folders', requireAuth, async (req, res) => {
+app.post('/api/folders', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { name, color } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -1541,9 +1588,10 @@ app.post('/api/folders', requireAuth, async (req, res) => {
     }
     const id = generateId();
     const { rows } = await pool.query(
-      'INSERT INTO folders (id, name, color) VALUES ($1, $2, $3) RETURNING *',
-      [id, name.trim().slice(0, 100), typeof color === 'string' ? color : '#6366f1']
+      'INSERT INTO folders (id, org_id, name, color) VALUES ($1, $2, $3, $4) RETURNING *',
+      [id, req.orgId, name.trim().slice(0, 100), typeof color === 'string' ? color : '#6366f1']
     );
+    logAudit({ req, category: 'file', verb: 'created', resource: 'Folder', detail: rows[0].name });
     res.status(201).json({ success: true, data: mapFolder(rows[0]) });
   } catch (err) {
     console.error('POST /api/folders error:', err.message);
@@ -1551,9 +1599,10 @@ app.post('/api/folders', requireAuth, async (req, res) => {
   }
 });
 
-app.delete('/api/folders/:id', requireAuth, async (req, res) => {
+app.delete('/api/folders/:id', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
-    await pool.query('DELETE FROM folders WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM folders WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'file', verb: 'deleted', resource: 'Folder', detail: req.params.id });
     res.json({ success: true, message: 'Folder deleted' });
   } catch (err) {
     console.error('DELETE /api/folders/:id error:', err.message);
@@ -1562,13 +1611,13 @@ app.delete('/api/folders/:id', requireAuth, async (req, res) => {
 });
 
 // ===== FILES CRUD =====
-app.get('/api/files', requireAuth, async (req, res) => {
+app.get('/api/files', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { folderId } = req.query;
-    let query = 'SELECT * FROM files';
-    const params = [];
+    let query = 'SELECT * FROM files WHERE org_id = $1';
+    const params = [req.orgId];
     if (folderId && typeof folderId === 'string') {
-      query += ' WHERE folder_id = $1';
+      query += ' AND folder_id = $2';
       params.push(folderId);
     }
     query += ' ORDER BY created_at DESC';
@@ -1580,7 +1629,7 @@ app.get('/api/files', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
+app.post('/api/files', requireAuth, requirePlan('grow'), upload.single('file'), async (req, res) => {
   try {
     let fileUrl = '';
     let storagePath = '';
@@ -1638,7 +1687,7 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
     }
 
     if (folderId) {
-      const folderCheck = await pool.query('SELECT id FROM folders WHERE id = $1', [folderId]);
+      const folderCheck = await pool.query('SELECT id FROM folders WHERE id = $1 AND org_id = $2', [folderId, req.orgId]);
       if (!folderCheck.rows.length) {
         // Clean up uploaded file if folder doesn't exist
         if (storagePath && supabase) await supabase.storage.from(SUPABASE_BUCKET).remove([storagePath]);
@@ -1648,8 +1697,8 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
 
     const id = generateId();
     const { rows } = await pool.query(
-      'INSERT INTO files (id, name, type, size, folder_id, url, storage_path, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [id, fileName, fileType, fileSize, folderId, fileUrl, storagePath, uploadedBy]
+      'INSERT INTO files (id, org_id, name, type, size, folder_id, url, storage_path, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [id, req.orgId, fileName, fileType, fileSize, folderId, fileUrl, storagePath, uploadedBy]
     );
     const f = rows[0];
     logAudit({ req, category: 'file', verb: 'uploaded',
@@ -1661,15 +1710,15 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
   }
 });
 
-app.delete('/api/files/:id', requireAuth, async (req, res) => {
+app.delete('/api/files/:id', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT name, storage_path FROM files WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query('SELECT name, storage_path FROM files WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (rows.length && rows[0].storage_path && supabase) {
       const { error } = await supabase.storage.from(SUPABASE_BUCKET).remove([rows[0].storage_path]);
       if (error) console.warn('Storage delete warning:', error.message);
     }
     const fileName = rows[0]?.name || req.params.id;
-    await pool.query('DELETE FROM files WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM files WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     logAudit({ req, category: 'file', verb: 'deleted',
       resource: fileName, detail: 'File deleted' });
     res.json({ success: true, message: 'File deleted' });
@@ -1686,18 +1735,18 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
       pool.query(`SELECT
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE status = 'ACTIVE') AS active
-        FROM volunteers`),
+        FROM volunteers WHERE org_id = $1`, [req.orgId]),
       pool.query(`SELECT
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE status IN ('UPCOMING','PUBLISHED')) AS upcoming
-        FROM events`),
+        FROM events WHERE org_id = $1`, [req.orgId]),
       pool.query(`SELECT
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE status = 'PENDING') AS pending,
         COUNT(*) FILTER (WHERE status = 'APPROVED') AS approved
-        FROM applications`),
-      pool.query('SELECT COALESCE(SUM(hours_contributed), 0) AS total FROM volunteers'),
-      pool.query(`SELECT category, COUNT(*) AS count FROM events GROUP BY category ORDER BY count DESC`),
+        FROM applications WHERE org_id = $1`, [req.orgId]),
+      pool.query('SELECT COALESCE(SUM(hours_contributed), 0) AS total FROM volunteers WHERE org_id = $1', [req.orgId]),
+      pool.query(`SELECT category, COUNT(*) AS count FROM events WHERE org_id = $1 GROUP BY category ORDER BY count DESC`, [req.orgId]),
     ]);
 
     res.json({
@@ -1762,7 +1811,7 @@ function mapCompletion(r) {
 // ── Courses ───────────────────────────────────────────────────────────────────
 app.get('/api/training/courses', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM training_courses ORDER BY created_at DESC');
+    const { rows } = await pool.query('SELECT * FROM training_courses WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]);
     res.json({ success: true, data: rows.map(mapCourse) });
   } catch (err) {
     console.error('GET /api/training/courses error:', err.message);
@@ -1778,10 +1827,11 @@ app.post('/api/training/courses', requireAuth, async (req, res) => {
     }
     const id = generateId();
     const { rows } = await pool.query(
-      `INSERT INTO training_courses (id, title, description, category, color, estimated_minutes, sections, published)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO training_courses (id, org_id, title, description, category, color, estimated_minutes, sections, published)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [
         id,
+        req.orgId,
         title.trim().slice(0, 200),
         typeof description === 'string' ? description.slice(0, 2000) : '',
         typeof category === 'string' ? category.slice(0, 100) : 'Other',
@@ -1791,6 +1841,7 @@ app.post('/api/training/courses', requireAuth, async (req, res) => {
         Boolean(published),
       ]
     );
+    logAudit({ req, category: 'training', verb: 'created', resource: 'Course', detail: rows[0].title });
     res.status(201).json({ success: true, data: mapCourse(rows[0]) });
   } catch (err) {
     console.error('POST /api/training/courses error:', err.message);
@@ -1800,7 +1851,7 @@ app.post('/api/training/courses', requireAuth, async (req, res) => {
 
 app.put('/api/training/courses/:id', requireAuth, async (req, res) => {
   try {
-    const { rows: existing } = await pool.query('SELECT id FROM training_courses WHERE id = $1', [req.params.id]);
+    const { rows: existing } = await pool.query('SELECT id FROM training_courses WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!existing.length) return res.status(404).json({ success: false, error: 'Course not found' });
 
     const { title, description, category, color, estimatedMinutes, sections, published } = req.body;
@@ -1808,7 +1859,7 @@ app.put('/api/training/courses/:id', requireAuth, async (req, res) => {
       `UPDATE training_courses SET
         title=$1, description=$2, category=$3, color=$4,
         estimated_minutes=$5, sections=$6, published=$7
-       WHERE id=$8 RETURNING *`,
+       WHERE id=$8 AND org_id=$9 RETURNING *`,
       [
         typeof title === 'string' ? title.trim().slice(0, 200) : existing[0].title,
         typeof description === 'string' ? description.slice(0, 2000) : '',
@@ -1818,8 +1869,10 @@ app.put('/api/training/courses/:id', requireAuth, async (req, res) => {
         jsn(Array.isArray(sections) ? sections : []),
         Boolean(published),
         req.params.id,
+        req.orgId,
       ]
     );
+    logAudit({ req, category: 'training', verb: 'updated', resource: 'Course', detail: rows[0].title });
     res.json({ success: true, data: mapCourse(rows[0]) });
   } catch (err) {
     console.error('PUT /api/training/courses/:id error:', err.message);
@@ -1829,7 +1882,8 @@ app.put('/api/training/courses/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/training/courses/:id', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM training_courses WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM training_courses WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'training', verb: 'deleted', resource: 'Course', detail: req.params.id });
     res.json({ success: true, message: 'Course deleted' });
   } catch (err) {
     console.error('DELETE /api/training/courses/:id error:', err.message);
@@ -1840,7 +1894,7 @@ app.delete('/api/training/courses/:id', requireAuth, async (req, res) => {
 // ── Modules ───────────────────────────────────────────────────────────────────
 app.get('/api/training/modules', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM training_modules ORDER BY created_at DESC');
+    const { rows } = await pool.query('SELECT * FROM training_modules WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]);
     res.json({ success: true, data: rows.map(mapModule) });
   } catch (err) {
     console.error('GET /api/training/modules error:', err.message);
@@ -1856,10 +1910,11 @@ app.post('/api/training/modules', requireAuth, async (req, res) => {
     }
     const id = generateId();
     const { rows } = await pool.query(
-      'INSERT INTO training_modules (id, name, description, color, course_ids) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [id, name.trim().slice(0, 200), typeof description === 'string' ? description.slice(0, 1000) : '',
+      'INSERT INTO training_modules (id, org_id, name, description, color, course_ids) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [id, req.orgId, name.trim().slice(0, 200), typeof description === 'string' ? description.slice(0, 1000) : '',
        typeof color === 'string' ? color.slice(0, 20) : '#2563eb', jsn(Array.isArray(courseIds) ? courseIds : [])]
     );
+    logAudit({ req, category: 'training', verb: 'created', resource: 'Module', detail: rows[0].name });
     res.status(201).json({ success: true, data: mapModule(rows[0]) });
   } catch (err) {
     console.error('POST /api/training/modules error:', err.message);
@@ -1869,17 +1924,18 @@ app.post('/api/training/modules', requireAuth, async (req, res) => {
 
 app.put('/api/training/modules/:id', requireAuth, async (req, res) => {
   try {
-    const { rows: existing } = await pool.query('SELECT id FROM training_modules WHERE id = $1', [req.params.id]);
+    const { rows: existing } = await pool.query('SELECT id FROM training_modules WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!existing.length) return res.status(404).json({ success: false, error: 'Module not found' });
 
     const { name, description, color, courseIds } = req.body;
     const { rows } = await pool.query(
-      'UPDATE training_modules SET name=$1, description=$2, color=$3, course_ids=$4 WHERE id=$5 RETURNING *',
+      'UPDATE training_modules SET name=$1, description=$2, color=$3, course_ids=$4 WHERE id=$5 AND org_id=$6 RETURNING *',
       [typeof name === 'string' ? name.trim().slice(0, 200) : '',
        typeof description === 'string' ? description.slice(0, 1000) : '',
        typeof color === 'string' ? color.slice(0, 20) : '#2563eb',
-       jsn(Array.isArray(courseIds) ? courseIds : []), req.params.id]
+       jsn(Array.isArray(courseIds) ? courseIds : []), req.params.id, req.orgId]
     );
+    logAudit({ req, category: 'training', verb: 'updated', resource: 'Module', detail: rows[0].name });
     res.json({ success: true, data: mapModule(rows[0]) });
   } catch (err) {
     console.error('PUT /api/training/modules/:id error:', err.message);
@@ -1889,7 +1945,8 @@ app.put('/api/training/modules/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/training/modules/:id', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM training_modules WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM training_modules WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'training', verb: 'deleted', resource: 'Module', detail: req.params.id });
     res.json({ success: true, message: 'Module deleted' });
   } catch (err) {
     console.error('DELETE /api/training/modules/:id error:', err.message);
@@ -1901,10 +1958,10 @@ app.delete('/api/training/modules/:id', requireAuth, async (req, res) => {
 app.get('/api/training/completions', requireAuth, async (req, res) => {
   try {
     const { courseId } = req.query;
-    let query = 'SELECT * FROM training_completions';
-    const params = [];
+    let query = 'SELECT * FROM training_completions WHERE org_id = $1';
+    const params = [req.orgId];
     if (courseId && typeof courseId === 'string') {
-      query += ' WHERE course_id = $1';
+      query += ' AND course_id = $2';
       params.push(courseId);
     }
     query += ' ORDER BY created_at DESC';
@@ -1922,17 +1979,18 @@ app.post('/api/training/completions', requireAuth, async (req, res) => {
     if (!courseId || !volunteerId || !completedAt) {
       return res.status(400).json({ success: false, error: 'courseId, volunteerId, and completedAt are required' });
     }
-    const courseCheck = await pool.query('SELECT id FROM training_courses WHERE id = $1', [courseId]);
+    const courseCheck = await pool.query('SELECT id FROM training_courses WHERE id = $1 AND org_id = $2', [courseId, req.orgId]);
     if (!courseCheck.rows.length) return res.status(400).json({ success: false, error: 'Course not found' });
 
     const id = generateId();
     const { rows } = await pool.query(
-      `INSERT INTO training_completions (id, course_id, volunteer_id, volunteer_name, completed_at, submitted_files, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [id, courseId, volunteerId, typeof volunteerName === 'string' ? volunteerName.slice(0, 200) : '',
+      `INSERT INTO training_completions (id, org_id, course_id, volunteer_id, volunteer_name, completed_at, submitted_files, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [id, req.orgId, courseId, volunteerId, typeof volunteerName === 'string' ? volunteerName.slice(0, 200) : '',
        completedAt, jsn(Array.isArray(submittedFiles) ? submittedFiles : []),
        typeof notes === 'string' ? notes.slice(0, 1000) : '']
     );
+    logAudit({ req, category: 'training', verb: 'created', resource: 'Completion', detail: `${rows[0].volunteer_name} — ${courseId}` });
     res.status(201).json({ success: true, data: mapCompletion(rows[0]) });
   } catch (err) {
     console.error('POST /api/training/completions error:', err.message);
@@ -1942,7 +2000,8 @@ app.post('/api/training/completions', requireAuth, async (req, res) => {
 
 app.delete('/api/training/completions/:id', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM training_completions WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM training_completions WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'training', verb: 'deleted', resource: 'Completion', detail: req.params.id });
     res.json({ success: true, message: 'Completion deleted' });
   } catch (err) {
     console.error('DELETE /api/training/completions/:id error:', err.message);
@@ -1971,8 +2030,8 @@ app.get('/api/training/assignments', requireAuth, async (req, res) => {
   try {
     const { courseId } = req.query;
     const { rows } = courseId
-      ? await pool.query('SELECT * FROM training_assignments WHERE course_id = $1 ORDER BY assigned_at ASC', [courseId])
-      : await pool.query('SELECT * FROM training_assignments ORDER BY assigned_at ASC');
+      ? await pool.query('SELECT * FROM training_assignments WHERE org_id = $1 AND course_id = $2 ORDER BY assigned_at ASC', [req.orgId, courseId])
+      : await pool.query('SELECT * FROM training_assignments WHERE org_id = $1 ORDER BY assigned_at ASC', [req.orgId]);
     res.json({ success: true, data: rows.map(mapAssignment) });
   } catch (err) {
     console.error('GET /api/training/assignments error:', err.message);
@@ -1992,14 +2051,15 @@ app.post('/api/training/assignments', requireAuth, writeLimiter, async (req, res
       const personType = (typeof person.type === 'string' && person.type.trim()) ? person.type.trim() : 'volunteer';
       const id = Math.random().toString(36).slice(2, 10);
       const { rows } = await pool.query(
-        `INSERT INTO training_assignments (id, course_id, person_id, person_name, person_type, due_date)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO training_assignments (id, org_id, course_id, person_id, person_name, person_type, due_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (course_id, person_id, person_type) DO UPDATE SET due_date = EXCLUDED.due_date
          RETURNING *`,
-        [id, courseId, person.id, person.name || '', personType, dueDate || null]
+        [id, req.orgId, courseId, person.id, person.name || '', personType, dueDate || null]
       );
       created.push(mapAssignment(rows[0]));
     }
+    logAudit({ req, category: 'training', verb: 'assigned', resource: 'Course', detail: `${people.length} assigned to ${courseId}` });
     res.status(201).json({ success: true, data: created });
   } catch (err) {
     console.error('POST /api/training/assignments error:', err.message);
@@ -2010,11 +2070,49 @@ app.post('/api/training/assignments', requireAuth, writeLimiter, async (req, res
 // DELETE /api/training/assignments/:id
 app.delete('/api/training/assignments/:id', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM training_assignments WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM training_assignments WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'training', verb: 'deleted', resource: 'Assignment', detail: req.params.id });
     res.json({ success: true, message: 'Assignment removed' });
   } catch (err) {
     console.error('DELETE /api/training/assignments/:id error:', err.message);
     res.status(500).json({ success: false, error: 'Failed to delete assignment' });
+  }
+});
+
+// ── Section Progress ─────────────────────────────────────────────────────────
+
+// GET /api/training/section-progress?courseId=X&volunteerId=Y
+app.get('/api/training/section-progress', requireAuth, async (req, res) => {
+  try {
+    const { courseId, volunteerId } = req.query;
+    if (!courseId || !volunteerId) return res.status(400).json({ success: false, error: 'courseId and volunteerId required' });
+    const { rows } = await pool.query(
+      'SELECT section_id, completed_at FROM training_section_progress WHERE org_id = $1 AND course_id = $2 AND volunteer_id = $3',
+      [req.orgId, courseId, volunteerId]
+    );
+    res.json({ success: true, data: rows.map(r => ({ sectionId: r.section_id, completedAt: r.completed_at })) });
+  } catch (err) {
+    console.error('GET /api/training/section-progress error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch section progress' });
+  }
+});
+
+// POST /api/training/section-progress
+app.post('/api/training/section-progress', requireAuth, async (req, res) => {
+  try {
+    const { courseId, volunteerId, sectionId } = req.body;
+    if (!courseId || !volunteerId || !sectionId) return res.status(400).json({ success: false, error: 'courseId, volunteerId, sectionId required' });
+    const id = generateId();
+    await pool.query(
+      `INSERT INTO training_section_progress (id, org_id, course_id, volunteer_id, section_id)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (course_id, volunteer_id, section_id) DO NOTHING`,
+      [id, req.orgId, courseId, volunteerId, sectionId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /api/training/section-progress error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to save section progress' });
   }
 });
 
@@ -2024,7 +2122,7 @@ app.get('/api/members', requireAuth, async (req, res) => {
   try {
     const limit = parseIntParam(req.query.limit, 100, 1, 500);
     const { rows } = await pool.query(
-      `SELECT * FROM members WHERE status != 'inactive' ORDER BY name ASC LIMIT $1`, [limit]
+      `SELECT * FROM members WHERE org_id = $1 AND status != 'inactive' ORDER BY name ASC LIMIT $2`, [req.orgId, limit]
     );
     res.json({ success: true, data: rows.map(r => ({ id: r.id, name: r.name, email: r.email, membershipType: r.membership_type, status: r.status })) });
   } catch (err) {
@@ -2039,7 +2137,7 @@ app.get('/api/employees', requireAuth, async (req, res) => {
   try {
     const limit = parseIntParam(req.query.limit, 100, 1, 500);
     const { rows } = await pool.query(
-      `SELECT * FROM employees WHERE status = 'active' ORDER BY name ASC LIMIT $1`, [limit]
+      `SELECT * FROM employees WHERE org_id = $1 ORDER BY name ASC LIMIT $2`, [req.orgId, limit]
     );
     res.json({ success: true, data: rows.map(r => ({ id: r.id, name: r.name, email: r.email, department: r.department, title: r.title, status: r.status })) });
   } catch (err) {
@@ -2048,21 +2146,60 @@ app.get('/api/employees', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/employees', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { name, email, phone = '', department = '', title = '', status = 'active' } = req.body;
+    if (!name?.trim()) return res.status(400).json({ success: false, error: 'Name is required' });
+    const id = `emp_${require('crypto').randomUUID()}`;
+    const { rows } = await pool.query(
+      `INSERT INTO employees (id, org_id, name, email, phone, department, title, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [id, req.orgId, name.trim(), (email || '').trim(), phone.trim(), department.trim(), title.trim(), status]
+    );
+    const r = rows[0];
+    logAudit({ req, category: 'employees', verb: 'created', resource: r.name });
+    res.status(201).json({ success: true, data: { id: r.id, name: r.name, email: r.email, department: r.department, title: r.title, status: r.status } });
+  } catch (err) {
+    console.error('POST /api/employees error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to create employee' });
+  }
+});
+
 // ─── People Groups ────────────────────────────────────────────────────────────
 
 function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'group';
 }
+function mapApplicationTemplate(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    questions: typeof r.questions === 'string' ? JSON.parse(r.questions) : (r.questions ?? []),
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    submissionCount: 0,
+  };
+}
+
 function mapGroup(r) {
-  return { id: r.id, name: r.name, slug: r.slug, color: r.color, createdAt: r.created_at };
+  return {
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    color: r.color,
+    createdAt: r.created_at,
+    applicationTemplateId: r.application_template_id ?? null,
+  };
 }
 function mapGroupMember(r) {
   return { id: r.id, groupId: r.group_id, name: r.name, email: r.email, phone: r.phone, status: r.status, notes: r.notes, joinedAt: r.joined_at };
 }
 
-app.get('/api/people/groups', requireAuth, async (req, res) => {
+app.get('/api/people/groups', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM people_groups ORDER BY name ASC');
+    const { rows } = await pool.query('SELECT * FROM people_groups WHERE org_id = $1 ORDER BY name ASC', [req.orgId]);
     res.json({ success: true, data: rows.map(mapGroup) });
   } catch (err) {
     console.error('GET /api/people/groups error:', err.message);
@@ -2070,9 +2207,9 @@ app.get('/api/people/groups', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/people/groups', requireAuth, writeLimiter, async (req, res) => {
+app.post('/api/people/groups', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
-    const { name, color } = req.body;
+    const { name, color, applicationTemplateId } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ success: false, error: 'name is required' });
     }
@@ -2082,14 +2219,16 @@ app.post('/api/people/groups', requireAuth, writeLimiter, async (req, res) => {
     let attempt = 1;
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const check = await pool.query('SELECT id FROM people_groups WHERE slug = $1', [slug]);
+      const check = await pool.query('SELECT id FROM people_groups WHERE org_id = $1 AND slug = $2', [req.orgId, slug]);
       if (!check.rows.length) break;
       slug = `${baseSlug}-${attempt++}`;
     }
+    const templateId = typeof applicationTemplateId === 'string' && applicationTemplateId ? applicationTemplateId : null;
     const { rows } = await pool.query(
-      'INSERT INTO people_groups (id, name, slug, color) VALUES ($1,$2,$3,$4) RETURNING *',
-      [id, name.trim().slice(0, 100), slug, typeof color === 'string' ? color.slice(0, 20) : '#6366f1']
+      'INSERT INTO people_groups (id, org_id, name, slug, color, application_template_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [id, req.orgId, name.trim().slice(0, 100), slug, typeof color === 'string' ? color.slice(0, 20) : '#6366f1', templateId]
     );
+    logAudit({ req, category: 'settings', verb: 'created', resource: 'People Group', detail: rows[0].name });
     res.status(201).json({ success: true, data: mapGroup(rows[0]) });
   } catch (err) {
     console.error('POST /api/people/groups error:', err.message);
@@ -2097,14 +2236,22 @@ app.post('/api/people/groups', requireAuth, writeLimiter, async (req, res) => {
   }
 });
 
-app.put('/api/people/groups/:id', requireAuth, writeLimiter, async (req, res) => {
+app.put('/api/people/groups/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
-    const { name, color } = req.body;
-    const { rows } = await pool.query(
-      'UPDATE people_groups SET name=$1, color=$2 WHERE id=$3 RETURNING *',
-      [typeof name === 'string' ? name.trim().slice(0, 100) : '', typeof color === 'string' ? color.slice(0, 20) : '#6366f1', req.params.id]
-    );
+    const { name, color, applicationTemplateId } = req.body;
+    const templateId = applicationTemplateId === undefined ? undefined
+      : (typeof applicationTemplateId === 'string' && applicationTemplateId ? applicationTemplateId : null);
+    let query, params;
+    if (templateId !== undefined) {
+      query = 'UPDATE people_groups SET name=$1, color=$2, application_template_id=$3 WHERE id=$4 AND org_id=$5 RETURNING *';
+      params = [typeof name === 'string' ? name.trim().slice(0, 100) : '', typeof color === 'string' ? color.slice(0, 20) : '#6366f1', templateId, req.params.id, req.orgId];
+    } else {
+      query = 'UPDATE people_groups SET name=$1, color=$2 WHERE id=$3 AND org_id=$4 RETURNING *';
+      params = [typeof name === 'string' ? name.trim().slice(0, 100) : '', typeof color === 'string' ? color.slice(0, 20) : '#6366f1', req.params.id, req.orgId];
+    }
+    const { rows } = await pool.query(query, params);
     if (!rows.length) return res.status(404).json({ success: false, error: 'Group not found' });
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'People Group', detail: rows[0].name });
     res.json({ success: true, data: mapGroup(rows[0]) });
   } catch (err) {
     console.error('PUT /api/people/groups/:id error:', err.message);
@@ -2112,9 +2259,10 @@ app.put('/api/people/groups/:id', requireAuth, writeLimiter, async (req, res) =>
   }
 });
 
-app.delete('/api/people/groups/:id', requireAuth, writeLimiter, async (req, res) => {
+app.delete('/api/people/groups/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
-    await pool.query('DELETE FROM people_groups WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM people_groups WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'settings', verb: 'deleted', resource: 'People Group', detail: req.params.id });
     res.json({ success: true, message: 'Group deleted' });
   } catch (err) {
     console.error('DELETE /api/people/groups/:id error:', err.message);
@@ -2122,13 +2270,207 @@ app.delete('/api/people/groups/:id', requireAuth, writeLimiter, async (req, res)
   }
 });
 
-// ─── Group Members ────────────────────────────────────────────────────────────
+// ─── Application Templates ────────────────────────────────────────────────────
 
-app.get('/api/people/groups/:groupId/members', requireAuth, async (req, res) => {
+app.get('/api/application-templates', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM group_members WHERE group_id = $1 ORDER BY name ASC',
-      [req.params.groupId]
+      'SELECT * FROM application_templates WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]
+    );
+    res.json({ success: true, data: rows.map(mapApplicationTemplate) });
+  } catch (err) {
+    console.error('GET /api/application-templates error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch templates' });
+  }
+});
+
+app.post('/api/application-templates', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { name, description, questions, status } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    const id = generateId();
+    const { rows } = await pool.query(
+      'INSERT INTO application_templates (id, org_id, name, description, questions, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [
+        id,
+        req.orgId,
+        name.trim().slice(0, 200),
+        typeof description === 'string' ? description.trim().slice(0, 1000) : '',
+        JSON.stringify(Array.isArray(questions) ? questions : []),
+        ['active', 'draft', 'archived'].includes(status) ? status : 'active',
+      ]
+    );
+    logAudit({ req, category: 'settings', verb: 'created', resource: 'Application Template', detail: rows[0].name });
+    res.status(201).json({ success: true, data: mapApplicationTemplate(rows[0]) });
+  } catch (err) {
+    console.error('POST /api/application-templates error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to create template' });
+  }
+});
+
+app.put('/api/application-templates/:id', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { name, description, questions, status } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    const { rows } = await pool.query(
+      'UPDATE application_templates SET name=$1, description=$2, questions=$3, status=$4, updated_at=NOW() WHERE id=$5 AND org_id=$6 RETURNING *',
+      [
+        name.trim().slice(0, 200),
+        typeof description === 'string' ? description.trim().slice(0, 1000) : '',
+        JSON.stringify(Array.isArray(questions) ? questions : []),
+        ['active', 'draft', 'archived'].includes(status) ? status : 'active',
+        req.params.id,
+        req.orgId,
+      ]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Template not found' });
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Application Template', detail: rows[0].name });
+    res.json({ success: true, data: mapApplicationTemplate(rows[0]) });
+  } catch (err) {
+    console.error('PUT /api/application-templates/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to update template' });
+  }
+});
+
+app.delete('/api/application-templates/:id', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM application_templates WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'settings', verb: 'deleted', resource: 'Application Template', detail: req.params.id });
+    res.json({ success: true, message: 'Template deleted' });
+  } catch (err) {
+    console.error('DELETE /api/application-templates/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to delete template' });
+  }
+});
+
+// Public endpoint — no auth — used by signup form
+app.get('/api/application-templates/:id/public', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM application_templates WHERE id = $1 AND status = 'active'",
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Template not found' });
+    res.json({ success: true, data: mapApplicationTemplate(rows[0]) });
+  } catch (err) {
+    console.error('GET /api/application-templates/:id/public error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch template' });
+  }
+});
+
+// ─── Form Submissions ─────────────────────────────────────────────────────────
+
+// Public endpoint — no auth, so volunteers can submit from /apply
+app.post('/api/form-submissions/public', writeLimiter, async (req, res) => {
+  try {
+    const { templateId, name, email, phone, answers, applicantType } = req.body;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, error: 'A valid email is required' });
+    }
+
+    let templateName = '';
+    let submissionOrgId = 'admin-1'; // fallback for public submissions
+    if (templateId && typeof templateId === 'string') {
+      const tRes = await pool.query(
+        "SELECT name, org_id FROM application_templates WHERE id = $1 AND status = 'active'",
+        [templateId]
+      );
+      if (tRes.rows.length) {
+        templateName = tRes.rows[0].name;
+        submissionOrgId = tRes.rows[0].org_id || submissionOrgId;
+      }
+    }
+
+    const id = generateId();
+    const { rows } = await pool.query(
+      `INSERT INTO form_submissions
+         (id, org_id, template_id, template_name, applicant_type, name, email, phone, answers)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [
+        id,
+        submissionOrgId,
+        templateId || null,
+        templateName,
+        ['volunteer','member','employee'].includes(applicantType) ? applicantType : 'volunteer',
+        name.trim(),
+        email.trim().toLowerCase(),
+        typeof phone === 'string' ? phone.trim() : '',
+        jsn(answers && typeof answers === 'object' ? answers : {}),
+      ]
+    );
+    res.status(201).json({ success: true, data: mapFormSubmission(rows[0]) });
+  } catch (err) {
+    console.error('POST /api/form-submissions/public error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to submit application' });
+  }
+});
+
+app.get('/api/form-submissions', requireAuth, async (req, res) => {
+  try {
+    const { status, templateId } = req.query;
+    const conditions = [`org_id = $1`];
+    const params = [req.orgId];
+    let idx = 2;
+
+    if (status && typeof status === 'string') {
+      conditions.push(`status = $${idx++}`);
+      params.push(status);
+    }
+    if (templateId && typeof templateId === 'string') {
+      conditions.push(`template_id = $${idx++}`);
+      params.push(templateId);
+    }
+
+    const where = `WHERE ${conditions.join(' AND ')}`;
+    const { rows } = await pool.query(
+      `SELECT * FROM form_submissions ${where} ORDER BY created_at DESC`,
+      params
+    );
+    res.json({ success: true, data: rows.map(mapFormSubmission) });
+  } catch (err) {
+    console.error('GET /api/form-submissions error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch submissions' });
+  }
+});
+
+app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['APPROVED', 'REJECTED', 'PENDING'].includes(status)) {
+      return res.status(400).json({ success: false, error: 'status must be APPROVED, REJECTED, or PENDING' });
+    }
+    const { rows } = await pool.query(
+      'UPDATE form_submissions SET status = $1 WHERE id = $2 AND org_id = $3 RETURNING *',
+      [status, req.params.id, req.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Submission not found' });
+
+    const sub = rows[0];
+    logAudit({ req, category: 'application', verb: status === 'APPROVED' ? 'approved' : status === 'REJECTED' ? 'rejected' : 'updated',
+      resource: sub.name, detail: `Form submission status set to ${status}` });
+
+    res.json({ success: true, data: mapFormSubmission(sub) });
+  } catch (err) {
+    console.error('PUT /api/form-submissions/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to update submission' });
+  }
+});
+
+// ─── Group Members ────────────────────────────────────────────────────────────
+
+app.get('/api/people/groups/:groupId/members', requireAuth, requirePlan('grow'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM group_members WHERE group_id = $1 AND org_id = $2 ORDER BY name ASC',
+      [req.params.groupId, req.orgId]
     );
     res.json({ success: true, data: rows.map(mapGroupMember) });
   } catch (err) {
@@ -2137,7 +2479,7 @@ app.get('/api/people/groups/:groupId/members', requireAuth, async (req, res) => 
   }
 });
 
-app.post('/api/people/groups/:groupId/members', requireAuth, writeLimiter, async (req, res) => {
+app.post('/api/people/groups/:groupId/members', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
     const { name, email, phone, status, notes } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -2145,13 +2487,14 @@ app.post('/api/people/groups/:groupId/members', requireAuth, writeLimiter, async
     }
     const id = generateId();
     const { rows } = await pool.query(
-      'INSERT INTO group_members (id, group_id, name, email, phone, status, notes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [id, req.params.groupId, name.trim().slice(0, 200),
+      'INSERT INTO group_members (id, org_id, group_id, name, email, phone, status, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [id, req.orgId, req.params.groupId, name.trim().slice(0, 200),
        typeof email === 'string' ? email.trim().slice(0, 200) : '',
        typeof phone === 'string' ? phone.trim().slice(0, 50) : '',
        typeof status === 'string' ? status : 'active',
        typeof notes === 'string' ? notes.slice(0, 1000) : '']
     );
+    logAudit({ req, category: 'people', verb: 'created', resource: 'Group Member', detail: rows[0].name });
     res.status(201).json({ success: true, data: mapGroupMember(rows[0]) });
   } catch (err) {
     console.error('POST /api/people/groups/:groupId/members error:', err.message);
@@ -2159,19 +2502,20 @@ app.post('/api/people/groups/:groupId/members', requireAuth, writeLimiter, async
   }
 });
 
-app.put('/api/people/groups/:groupId/members/:memberId', requireAuth, writeLimiter, async (req, res) => {
+app.put('/api/people/groups/:groupId/members/:memberId', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
     const { name, email, phone, status, notes } = req.body;
     const { rows } = await pool.query(
-      'UPDATE group_members SET name=$1, email=$2, phone=$3, status=$4, notes=$5 WHERE id=$6 AND group_id=$7 RETURNING *',
+      'UPDATE group_members SET name=$1, email=$2, phone=$3, status=$4, notes=$5 WHERE id=$6 AND group_id=$7 AND org_id=$8 RETURNING *',
       [typeof name === 'string' ? name.trim().slice(0, 200) : '',
        typeof email === 'string' ? email.trim().slice(0, 200) : '',
        typeof phone === 'string' ? phone.trim().slice(0, 50) : '',
        typeof status === 'string' ? status : 'active',
        typeof notes === 'string' ? notes.slice(0, 1000) : '',
-       req.params.memberId, req.params.groupId]
+       req.params.memberId, req.params.groupId, req.orgId]
     );
     if (!rows.length) return res.status(404).json({ success: false, error: 'Member not found' });
+    logAudit({ req, category: 'people', verb: 'updated', resource: 'Group Member', detail: rows[0].name });
     res.json({ success: true, data: mapGroupMember(rows[0]) });
   } catch (err) {
     console.error('PUT /api/people/groups/:groupId/members/:memberId error:', err.message);
@@ -2179,9 +2523,10 @@ app.put('/api/people/groups/:groupId/members/:memberId', requireAuth, writeLimit
   }
 });
 
-app.delete('/api/people/groups/:groupId/members/:memberId', requireAuth, async (req, res) => {
+app.delete('/api/people/groups/:groupId/members/:memberId', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
-    await pool.query('DELETE FROM group_members WHERE id = $1 AND group_id = $2', [req.params.memberId, req.params.groupId]);
+    await pool.query('DELETE FROM group_members WHERE id = $1 AND group_id = $2 AND org_id = $3', [req.params.memberId, req.params.groupId, req.orgId]);
+    logAudit({ req, category: 'people', verb: 'deleted', resource: 'Group Member', detail: req.params.memberId });
     res.json({ success: true, message: 'Member deleted' });
   } catch (err) {
     console.error('DELETE /api/people/groups/:groupId/members/:memberId error:', err.message);
@@ -2238,7 +2583,7 @@ function mapQrCode(row) {
 
 app.get('/api/qr/campaigns', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM qr_campaigns ORDER BY created_at DESC');
+    const { rows } = await pool.query('SELECT * FROM qr_campaigns WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]);
     res.json({ success: true, data: rows.map(mapQrCampaign) });
   } catch (err) {
     console.error('GET /api/qr/campaigns error:', err.message);
@@ -2254,13 +2599,15 @@ app.post('/api/qr/campaigns', requireAuth, writeLimiter, async (req, res) => {
     }
     const id = 'cmp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     const { rows } = await pool.query(
-      'INSERT INTO qr_campaigns (id, name, description, color, status) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      'INSERT INTO qr_campaigns (id, org_id, name, description, color, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [id,
+       req.orgId,
        name.trim().slice(0, 200),
        typeof description === 'string' ? description.trim().slice(0, 500) : '',
        typeof color === 'string' ? color.trim() : '#3b82f6',
        typeof status === 'string' ? status : 'active']
     );
+    logAudit({ req, category: 'qr', verb: 'created', resource: 'QR Campaign', detail: rows[0].name });
     res.status(201).json({ success: true, data: mapQrCampaign(rows[0]) });
   } catch (err) {
     console.error('POST /api/qr/campaigns error:', err.message);
@@ -2272,14 +2619,15 @@ app.put('/api/qr/campaigns/:id', requireAuth, writeLimiter, async (req, res) => 
   try {
     const { name, description, color, status } = req.body;
     const { rows } = await pool.query(
-      'UPDATE qr_campaigns SET name=$1, description=$2, color=$3, status=$4 WHERE id=$5 RETURNING *',
+      'UPDATE qr_campaigns SET name=$1, description=$2, color=$3, status=$4 WHERE id=$5 AND org_id=$6 RETURNING *',
       [typeof name === 'string' ? name.trim().slice(0, 200) : '',
        typeof description === 'string' ? description.trim().slice(0, 500) : '',
        typeof color === 'string' ? color.trim() : '#3b82f6',
        typeof status === 'string' ? status : 'active',
-       req.params.id]
+       req.params.id, req.orgId]
     );
     if (!rows.length) return res.status(404).json({ success: false, error: 'Campaign not found' });
+    logAudit({ req, category: 'qr', verb: 'updated', resource: 'QR Campaign', detail: rows[0].name });
     res.json({ success: true, data: mapQrCampaign(rows[0]) });
   } catch (err) {
     console.error('PUT /api/qr/campaigns/:id error:', err.message);
@@ -2289,9 +2637,10 @@ app.put('/api/qr/campaigns/:id', requireAuth, writeLimiter, async (req, res) => 
 
 app.delete('/api/qr/campaigns/:id', requireAuth, async (req, res) => {
   try {
-    // Unlink QR codes from this campaign before deleting
-    await pool.query('UPDATE qr_codes SET campaign_id = NULL WHERE campaign_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM qr_campaigns WHERE id = $1', [req.params.id]);
+    // Unlink QR codes from this campaign before deleting (only this org's codes)
+    await pool.query('UPDATE qr_codes SET campaign_id = NULL WHERE campaign_id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    await pool.query('DELETE FROM qr_campaigns WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'qr', verb: 'deleted', resource: 'QR Campaign', detail: req.params.id });
     res.json({ success: true, message: 'Campaign deleted' });
   } catch (err) {
     console.error('DELETE /api/qr/campaigns/:id error:', err.message);
@@ -2303,7 +2652,7 @@ app.delete('/api/qr/campaigns/:id', requireAuth, async (req, res) => {
 
 app.get('/api/qr/codes', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM qr_codes ORDER BY created_at DESC');
+    const { rows } = await pool.query('SELECT * FROM qr_codes WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]);
     res.json({ success: true, data: rows.map(mapQrCode) });
   } catch (err) {
     console.error('GET /api/qr/codes error:', err.message);
@@ -2325,9 +2674,10 @@ app.post('/api/qr/codes', requireAuth, writeLimiter, async (req, res) => {
       ? `${BACKEND_PUBLIC_URL}/api/qr/redirect/${id}`
       : content.trim();
     const { rows } = await pool.query(
-      `INSERT INTO qr_codes (id, name, type, content, display_value, fg_color, bg_color, style, size, include_margin, status, campaign_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      `INSERT INTO qr_codes (id, org_id, name, type, content, display_value, fg_color, bg_color, style, size, include_margin, status, campaign_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [id,
+       req.orgId,
        typeof name === 'string' ? name.trim().slice(0, 200) : 'QR Code',
        qrType,
        effectiveContent,
@@ -2340,6 +2690,7 @@ app.post('/api/qr/codes', requireAuth, writeLimiter, async (req, res) => {
        typeof status === 'string' ? status : 'active',
        campaignId || null]
     );
+    logAudit({ req, category: 'qr', verb: 'created', resource: 'QR Code', detail: rows[0].name });
     res.status(201).json({ success: true, data: mapQrCode(rows[0]) });
   } catch (err) {
     console.error('POST /api/qr/codes error:', err.message);
@@ -2363,11 +2714,13 @@ app.patch('/api/qr/codes/:id', requireAuth, writeLimiter, async (req, res) => {
     }
     if (!sets.length) return res.status(400).json({ success: false, error: 'No fields to update' });
     vals.push(req.params.id);
+    vals.push(req.orgId);
     const { rows } = await pool.query(
-      `UPDATE qr_codes SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
+      `UPDATE qr_codes SET ${sets.join(', ')} WHERE id = $${idx} AND org_id = $${idx + 1} RETURNING *`,
       vals
     );
     if (!rows.length) return res.status(404).json({ success: false, error: 'QR code not found' });
+    logAudit({ req, category: 'qr', verb: 'updated', resource: 'QR Code', detail: rows[0].name });
     res.json({ success: true, data: mapQrCode(rows[0]) });
   } catch (err) {
     console.error('PATCH /api/qr/codes/:id error:', err.message);
@@ -2377,7 +2730,8 @@ app.patch('/api/qr/codes/:id', requireAuth, writeLimiter, async (req, res) => {
 
 app.delete('/api/qr/codes/:id', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM qr_codes WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM qr_codes WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'qr', verb: 'deleted', resource: 'QR Code', detail: req.params.id });
     res.json({ success: true, message: 'QR code deleted' });
   } catch (err) {
     console.error('DELETE /api/qr/codes/:id error:', err.message);
@@ -2424,10 +2778,10 @@ app.get('/api/qr/redirect/:id', async (req, res) => {
 
 // ===== QR ANALYTICS =====
 
-app.get('/api/qr/codes/:id/analytics', requireAuth, async (req, res) => {
+app.get('/api/qr/codes/:id/analytics', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const qrId = req.params.id;
-    const { rows: check } = await pool.query('SELECT id FROM qr_codes WHERE id = $1', [qrId]);
+    const { rows: check } = await pool.query('SELECT id FROM qr_codes WHERE id = $1 AND org_id = $2', [qrId, req.orgId]);
     if (!check.length) return res.status(404).json({ success: false, error: 'QR code not found' });
 
     const [totalsRes, timelineRes, devicesRes, referrersRes, hourlyRes] = await Promise.all([
@@ -2602,6 +2956,7 @@ function mapPortalSettings(row) {
 }
 
 // Public — no auth needed (volunteers/members need to access the portal HTML)
+// portal_settings PK is org_id + ':' + portal_type. Public reads return first matching row (single-tenant installs).
 app.get('/api/portal/settings/:type', async (req, res) => {
   const { type } = req.params;
   if (!PORTAL_TYPES.has(type)) return res.status(400).json({ error: 'Invalid portal type' });
@@ -2623,18 +2978,19 @@ app.put('/api/portal/settings/:type', requireAuth, async (req, res) => {
   const { themeId, customHtml, useCustom } = req.body;
   try {
     await pool.query(
-      `INSERT INTO portal_settings (portal_type, theme_id, custom_html, use_custom, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (portal_type) DO UPDATE SET
+      `INSERT INTO portal_settings (id, org_id, portal_type, theme_id, custom_html, use_custom, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (id) DO UPDATE SET
          theme_id   = EXCLUDED.theme_id,
          custom_html = EXCLUDED.custom_html,
          use_custom = EXCLUDED.use_custom,
          updated_at = NOW()`,
-      [type, themeId || 'default', customHtml || '', useCustom === true]
+      [`${req.orgId}:${type}`, req.orgId, type, themeId || 'default', customHtml || '', useCustom === true]
     );
     const { rows } = await pool.query(
-      'SELECT * FROM portal_settings WHERE portal_type = $1', [type]
+      'SELECT * FROM portal_settings WHERE portal_type = $1 AND org_id = $2', [type, req.orgId]
     );
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Portal', detail: `${type} theme updated` });
     res.json(mapPortalSettings(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2643,8 +2999,12 @@ app.put('/api/portal/settings/:type', requireAuth, async (req, res) => {
 
 // ── Org Settings ──────────────────────────────────────────────────────────────
 
-/** Fetch the single org_settings row (always id='default'). */
-async function getOrgSettings() {
+/** Fetch the org_settings row for a given org. Falls back to 'default' for legacy installs. */
+async function getOrgSettings(orgId) {
+  if (orgId) {
+    const { rows } = await pool.query("SELECT * FROM org_settings WHERE id = $1", [orgId]);
+    if (rows[0]) return rows[0];
+  }
   const { rows } = await pool.query("SELECT * FROM org_settings WHERE id = 'default'");
   return rows[0] || {};
 }
@@ -2667,9 +3027,9 @@ function mapOrgSettings(s) {
   };
 }
 
-app.get('/api/settings', requireAuth, async (_req, res) => {
+app.get('/api/settings', requireAuth, async (req, res) => {
   try {
-    const s = await getOrgSettings();
+    const s = await getOrgSettings(req.orgId);
     res.json(mapOrgSettings(s));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2683,22 +3043,24 @@ app.put('/api/settings', requireAuth, async (req, res) => {
   } = req.body;
   try {
     await pool.query(
-      `UPDATE org_settings
-       SET email_from_name    = $1,
-           email_from_address = $2,
-           sms_from_name      = $3,
-           org_name           = $4,
-           website            = $5,
-           org_email          = $6,
-           phone              = $7,
-           address            = $8,
-           timezone           = $9,
-           language           = $10,
-           description        = $11,
-           tax_id             = $12,
-           logo_url           = $13,
-           updated_at         = NOW()
-       WHERE id = 'default'`,
+      `INSERT INTO org_settings (id, email_from_name, email_from_address, sms_from_name,
+           org_name, website, org_email, phone, address, timezone, language, description, tax_id, logo_url, updated_at)
+       VALUES ($14,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
+       ON CONFLICT (id) DO UPDATE SET
+           email_from_name    = EXCLUDED.email_from_name,
+           email_from_address = EXCLUDED.email_from_address,
+           sms_from_name      = EXCLUDED.sms_from_name,
+           org_name           = EXCLUDED.org_name,
+           website            = EXCLUDED.website,
+           org_email          = EXCLUDED.org_email,
+           phone              = EXCLUDED.phone,
+           address            = EXCLUDED.address,
+           timezone           = EXCLUDED.timezone,
+           language           = EXCLUDED.language,
+           description        = EXCLUDED.description,
+           tax_id             = EXCLUDED.tax_id,
+           logo_url           = EXCLUDED.logo_url,
+           updated_at         = NOW()`,
       [
         (emailFromName    || '').trim().slice(0, 100),
         (emailFromAddress || '').trim().slice(0, 200),
@@ -2713,14 +3075,39 @@ app.put('/api/settings', requireAuth, async (req, res) => {
         (description      || '').trim().slice(0, 2000),
         (taxId            || '').trim().slice(0, 50),
         (logoUrl          || '').slice(0, 2000000), // base64 data URL ≤ ~1.5 MB image
+        req.orgId,
       ]
     );
     logAudit({ req, category: 'settings', verb: 'updated',
       resource: 'Organization', detail: 'Settings updated' });
-    const s = await getOrgSettings();
+    const s = await getOrgSettings(req.orgId);
     res.json(mapOrgSettings(s));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/settings/volunteer-form', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT volunteer_form_id FROM org_settings WHERE id = $1", [req.orgId]);
+    res.json({ success: true, data: { volunteerFormId: rows[0]?.volunteer_form_id ?? null } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/settings/volunteer-form', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { volunteerFormId } = req.body;
+    const formId = typeof volunteerFormId === 'string' && volunteerFormId ? volunteerFormId : null;
+    await pool.query(
+      "INSERT INTO org_settings (id, volunteer_form_id) VALUES ($2, $1) ON CONFLICT (id) DO UPDATE SET volunteer_form_id = EXCLUDED.volunteer_form_id",
+      [formId, req.orgId]
+    );
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Volunteer Signup Form', detail: formId ? 'Form linked' : 'Form unlinked' });
+    res.json({ success: true, data: { volunteerFormId: formId } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -2735,9 +3122,9 @@ const DEFAULT_NOTIF_PREFS = {
   quiet_hours_enabled: false, quiet_start: '22:00', quiet_end: '08:00',
 };
 
-app.get('/api/notifications', requireAuth, async (_req, res) => {
+app.get('/api/notifications', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT notif_prefs FROM org_settings WHERE id = 'default'");
+    const { rows } = await pool.query("SELECT notif_prefs FROM org_settings WHERE id = $1", [req.orgId]);
     const stored = (rows[0]?.notif_prefs && typeof rows[0].notif_prefs === 'object')
       ? rows[0].notif_prefs : {};
     res.json({ success: true, data: { ...DEFAULT_NOTIF_PREFS, ...stored } });
@@ -2755,9 +3142,10 @@ app.put('/api/notifications', requireAuth, writeLimiter, async (req, res) => {
   const merged = { ...DEFAULT_NOTIF_PREFS, ...prefs };
   try {
     await pool.query(
-      "UPDATE org_settings SET notif_prefs = $1, updated_at = NOW() WHERE id = 'default'",
-      [JSON.stringify(merged)]
+      "INSERT INTO org_settings (id, notif_prefs, updated_at) VALUES ($2, $1, NOW()) ON CONFLICT (id) DO UPDATE SET notif_prefs = EXCLUDED.notif_prefs, updated_at = NOW()",
+      [JSON.stringify(merged), req.orgId]
     );
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Notification Preferences', detail: '' });
     res.json({ success: true, data: merged });
   } catch (err) {
     console.error('PUT /api/notifications error:', err.message);
@@ -2771,9 +3159,13 @@ app.put('/api/messaging', requireAuth, writeLimiter, async (req, res) => {
   const { emailFromName = '', emailFromAddress = '', smsFromName = '' } = req.body;
   try {
     await pool.query(
-      `UPDATE org_settings SET email_from_name=$1, email_from_address=$2, sms_from_name=$3, updated_at=NOW() WHERE id='default'`,
-      [emailFromName.trim().slice(0, 100), emailFromAddress.trim().slice(0, 200), smsFromName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11)]
+      `INSERT INTO org_settings (id, email_from_name, email_from_address, sms_from_name, updated_at)
+       VALUES ($4,$1,$2,$3,NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         email_from_name=$1, email_from_address=$2, sms_from_name=$3, updated_at=NOW()`,
+      [emailFromName.trim().slice(0, 100), emailFromAddress.trim().slice(0, 200), smsFromName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11), req.orgId]
     );
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Messaging Settings', detail: '' });
     res.json({ success: true, data: {
       emailFromName: emailFromName.trim().slice(0, 100),
       emailFromAddress: emailFromAddress.trim().slice(0, 200),
@@ -2787,12 +3179,12 @@ app.put('/api/messaging', requireAuth, writeLimiter, async (req, res) => {
 
 // ── Branding settings ─────────────────────────────────────────────────────────
 
-app.get('/api/branding', requireAuth, async (_req, res) => {
+app.get('/api/branding', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT portal_name, portal_subdomain, brand_primary, brand_accent,
               welcome_heading, welcome_subtext, footer_text, show_powered_by, logo_base64
-       FROM org_settings WHERE id = 'default'`
+       FROM org_settings WHERE id = $1`, [req.orgId]
     );
     const r = rows[0] || {};
     res.json({ success: true, data: {
@@ -2812,7 +3204,7 @@ app.get('/api/branding', requireAuth, async (_req, res) => {
   }
 });
 
-app.put('/api/branding', requireAuth, writeLimiter, async (req, res) => {
+app.put('/api/branding', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   const {
     portalName = '', subdomain = '', primaryColor = '#10b981', accentColor = '#0d9488',
     welcomeHeading = '', welcomeSubtext = '', footerText = '', showPoweredBy = true, logoBase64 = '',
@@ -2830,14 +3222,18 @@ app.put('/api/branding', requireAuth, writeLimiter, async (req, res) => {
       logoBase64:     String(logoBase64).slice(0, 500000),
     };
     await pool.query(
-      `UPDATE org_settings SET
-         portal_name=$1, portal_subdomain=$2, brand_primary=$3, brand_accent=$4,
-         welcome_heading=$5, welcome_subtext=$6, footer_text=$7, show_powered_by=$8,
-         logo_base64=$9, updated_at=NOW()
-       WHERE id='default'`,
+      `INSERT INTO org_settings (id, portal_name, portal_subdomain, brand_primary, brand_accent,
+         welcome_heading, welcome_subtext, footer_text, show_powered_by, logo_base64, updated_at)
+       VALUES ($10,$1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         portal_name=EXCLUDED.portal_name, portal_subdomain=EXCLUDED.portal_subdomain,
+         brand_primary=EXCLUDED.brand_primary, brand_accent=EXCLUDED.brand_accent,
+         welcome_heading=EXCLUDED.welcome_heading, welcome_subtext=EXCLUDED.welcome_subtext,
+         footer_text=EXCLUDED.footer_text, show_powered_by=EXCLUDED.show_powered_by,
+         logo_base64=EXCLUDED.logo_base64, updated_at=NOW()`,
       [cleaned.portalName, cleaned.subdomain, cleaned.primaryColor, cleaned.accentColor,
        cleaned.welcomeHeading, cleaned.welcomeSubtext, cleaned.footerText, cleaned.showPoweredBy,
-       cleaned.logoBase64]
+       cleaned.logoBase64, req.orgId]
     );
     logAudit({ req, category: 'settings', verb: 'updated', resource: 'Branding', detail: 'Branding settings updated' });
     res.json({ success: true, data: cleaned });
@@ -2874,7 +3270,7 @@ app.put('/api/auth/password', requireAuth, writeLimiter, async (req, res) => {
 
 // ── Org roles ─────────────────────────────────────────────────────────────────
 
-app.get('/api/roles', requireAuth, async (req, res) => {
+app.get('/api/roles', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM org_roles ORDER BY sort_order ASC, name ASC');
     res.json({ success: true, data: rows.map((r) => ({
@@ -2892,7 +3288,7 @@ app.get('/api/roles', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/roles', requireAuth, writeLimiter, async (req, res) => {
+app.post('/api/roles', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   const { name, description = '', color = 'bg-gray-500', permissions = {} } = req.body;
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ success: false, error: 'name is required' });
@@ -2907,6 +3303,7 @@ app.post('/api/roles', requireAuth, writeLimiter, async (req, res) => {
       [id, name.trim(), description.trim(), color, JSON.stringify(permissions), sortOrder]
     );
     const r = rows[0];
+    logAudit({ req, category: 'settings', verb: 'created', resource: 'Role', detail: r.name });
     res.status(201).json({ success: true, data: {
       id: r.id, name: r.name, description: r.description, color: r.color,
       permissions: typeof r.permissions === 'string' ? JSON.parse(r.permissions) : (r.permissions || {}),
@@ -2918,7 +3315,7 @@ app.post('/api/roles', requireAuth, writeLimiter, async (req, res) => {
   }
 });
 
-app.put('/api/roles/:id', requireAuth, writeLimiter, async (req, res) => {
+app.put('/api/roles/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   const { name, description, color, permissions } = req.body;
   const { id } = req.params;
   try {
@@ -2934,6 +3331,7 @@ app.put('/api/roles/:id', requireAuth, writeLimiter, async (req, res) => {
       [updName, updDesc, updColor, updPerms, id]
     );
     const r = rows[0];
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Role', detail: r.name });
     res.json({ success: true, data: {
       id: r.id, name: r.name, description: r.description, color: r.color,
       permissions: typeof r.permissions === 'string' ? JSON.parse(r.permissions) : (r.permissions || {}),
@@ -2945,13 +3343,14 @@ app.put('/api/roles/:id', requireAuth, writeLimiter, async (req, res) => {
   }
 });
 
-app.delete('/api/roles/:id', requireAuth, writeLimiter, async (req, res) => {
+app.delete('/api/roles/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   const { id } = req.params;
   try {
     const { rows } = await pool.query('SELECT is_system FROM org_roles WHERE id = $1', [id]);
     if (!rows.length) return res.status(404).json({ success: false, error: 'Role not found' });
     if (rows[0].is_system) return res.status(400).json({ success: false, error: 'Cannot delete system roles' });
     await pool.query('DELETE FROM org_roles WHERE id = $1', [id]);
+    logAudit({ req, category: 'settings', verb: 'deleted', resource: 'Role', detail: id });
     res.json({ success: true, message: 'Role deleted' });
   } catch (err) {
     console.error('DELETE /api/roles/:id error:', err.message);
@@ -2964,7 +3363,8 @@ app.delete('/api/roles/:id', requireAuth, writeLimiter, async (req, res) => {
 app.get('/api/team', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, email, full_name, role, created_at FROM users ORDER BY created_at ASC'
+      'SELECT id, email, full_name, role, created_at FROM users WHERE org_id = $1 ORDER BY created_at ASC',
+      [req.orgId]
     );
     res.json({ success: true, data: rows.map(u => ({
       id: u.id,
@@ -2979,7 +3379,7 @@ app.get('/api/team', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/team/:id/role', requireAuth, writeLimiter, async (req, res) => {
+app.put('/api/team/:id/role', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   const { role } = req.body;
   if (!role || typeof role !== 'string') {
     return res.status(400).json({ success: false, error: 'role is required' });
@@ -2993,8 +3393,8 @@ app.put('/api/team/:id/role', requireAuth, writeLimiter, async (req, res) => {
   }
   try {
     const { rows } = await pool.query(
-      'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, email, full_name, role, created_at',
-      [role, req.params.id]
+      'UPDATE users SET role = $1 WHERE id = $2 AND org_id = $3 RETURNING id, email, full_name, role, created_at',
+      [role, req.params.id, req.orgId]
     );
     if (!rows.length) return res.status(404).json({ success: false, error: 'User not found' });
     logAudit({ req, category: 'settings', verb: 'updated', resource: rows[0].full_name,
@@ -3011,8 +3411,8 @@ app.delete('/api/team/:id', requireAuth, writeLimiter, async (req, res) => {
     return res.status(400).json({ success: false, error: 'You cannot remove yourself' });
   }
   try {
-    const { rows } = await pool.query('SELECT full_name FROM users WHERE id = $1', [req.params.id]);
-    const { rowCount } = await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query('SELECT full_name FROM users WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    const { rowCount } = await pool.query('DELETE FROM users WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     if (!rowCount) return res.status(404).json({ success: false, error: 'User not found' });
     if (rows.length) {
       logAudit({ req, category: 'settings', verb: 'deleted', resource: rows[0].full_name,
@@ -3029,7 +3429,7 @@ app.delete('/api/team/:id', requireAuth, writeLimiter, async (req, res) => {
 
 app.get('/api/messages/templates', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM message_templates ORDER BY created_at ASC');
+    const { rows } = await pool.query('SELECT * FROM message_templates WHERE org_id = $1 ORDER BY created_at ASC', [req.orgId]);
     res.json(rows.map(mapTemplate));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3042,9 +3442,10 @@ app.post('/api/messages/templates', requireAuth, async (req, res) => {
   const id = 'tpl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   try {
     const { rows } = await pool.query(
-      'INSERT INTO message_templates (id, name, channel, subject, body) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [id, name.trim(), channel || 'email', (subject || '').trim(), body.trim()]
+      'INSERT INTO message_templates (id, org_id, name, channel, subject, body) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [id, req.orgId, name.trim(), channel || 'email', (subject || '').trim(), body.trim()]
     );
+    logAudit({ req, category: 'message', verb: 'created', resource: 'Template', detail: rows[0].name });
     res.json(mapTemplate(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3055,10 +3456,11 @@ app.put('/api/messages/templates/:id', requireAuth, async (req, res) => {
   const { name, channel, subject, body } = req.body;
   try {
     const { rows } = await pool.query(
-      'UPDATE message_templates SET name=$1, channel=$2, subject=$3, body=$4 WHERE id=$5 RETURNING *',
-      [(name || '').trim(), channel || 'email', (subject || '').trim(), (body || '').trim(), req.params.id]
+      'UPDATE message_templates SET name=$1, channel=$2, subject=$3, body=$4 WHERE id=$5 AND org_id=$6 RETURNING *',
+      [(name || '').trim(), channel || 'email', (subject || '').trim(), (body || '').trim(), req.params.id, req.orgId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    logAudit({ req, category: 'message', verb: 'updated', resource: 'Template', detail: rows[0].name });
     res.json(mapTemplate(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3066,7 +3468,8 @@ app.put('/api/messages/templates/:id', requireAuth, async (req, res) => {
 });
 
 app.delete('/api/messages/templates/:id', requireAuth, async (req, res) => {
-  await pool.query('DELETE FROM message_templates WHERE id=$1', [req.params.id]);
+  await pool.query('DELETE FROM message_templates WHERE id=$1 AND org_id=$2', [req.params.id, req.orgId]);
+  logAudit({ req, category: 'message', verb: 'deleted', resource: 'Template', detail: req.params.id });
   res.json({ ok: true });
 });
 
@@ -3074,7 +3477,7 @@ app.delete('/api/messages/templates/:id', requireAuth, async (req, res) => {
 
 app.get('/api/messages/reminders', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM auto_reminders ORDER BY created_at ASC');
+    const { rows } = await pool.query('SELECT * FROM auto_reminders WHERE org_id = $1 ORDER BY created_at ASC', [req.orgId]);
     res.json(rows.map(mapReminder));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3087,10 +3490,11 @@ app.post('/api/messages/reminders', requireAuth, async (req, res) => {
   const id = 'rem_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   try {
     const { rows } = await pool.query(
-      `INSERT INTO auto_reminders (id, name, channel, trigger_hours, template_id, custom_body, enabled, event_scope)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [id, name.trim(), channel || 'email', triggerHours ?? 24, templateId || null, customBody || '', enabled !== false, eventScope || 'all']
+      `INSERT INTO auto_reminders (id, org_id, name, channel, trigger_hours, template_id, custom_body, enabled, event_scope)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [id, req.orgId, name.trim(), channel || 'email', triggerHours ?? 24, templateId || null, customBody || '', enabled !== false, eventScope || 'all']
     );
+    logAudit({ req, category: 'message', verb: 'created', resource: 'Auto Reminder', detail: rows[0].name });
     res.json(mapReminder(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3102,10 +3506,11 @@ app.put('/api/messages/reminders/:id', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `UPDATE auto_reminders SET name=$1, channel=$2, trigger_hours=$3, template_id=$4,
-       custom_body=$5, enabled=$6, event_scope=$7 WHERE id=$8 RETURNING *`,
-      [(name || '').trim(), channel || 'email', triggerHours ?? 24, templateId || null, customBody || '', enabled !== false, eventScope || 'all', req.params.id]
+       custom_body=$5, enabled=$6, event_scope=$7 WHERE id=$8 AND org_id=$9 RETURNING *`,
+      [(name || '').trim(), channel || 'email', triggerHours ?? 24, templateId || null, customBody || '', enabled !== false, eventScope || 'all', req.params.id, req.orgId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    logAudit({ req, category: 'message', verb: 'updated', resource: 'Auto Reminder', detail: rows[0].name });
     res.json(mapReminder(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3113,7 +3518,8 @@ app.put('/api/messages/reminders/:id', requireAuth, async (req, res) => {
 });
 
 app.delete('/api/messages/reminders/:id', requireAuth, async (req, res) => {
-  await pool.query('DELETE FROM auto_reminders WHERE id=$1', [req.params.id]);
+  await pool.query('DELETE FROM auto_reminders WHERE id=$1 AND org_id=$2', [req.params.id, req.orgId]);
+  logAudit({ req, category: 'message', verb: 'deleted', resource: 'Auto Reminder', detail: req.params.id });
   res.json({ ok: true });
 });
 
@@ -3121,7 +3527,7 @@ app.delete('/api/messages/reminders/:id', requireAuth, async (req, res) => {
 
 app.get('/api/messages/history', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM sent_messages ORDER BY sent_at DESC LIMIT 200');
+    const { rows } = await pool.query('SELECT * FROM sent_messages WHERE org_id = $1 ORDER BY sent_at DESC LIMIT 200', [req.orgId]);
     res.json(rows.map(mapSentMessage));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3138,26 +3544,27 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
       const { rows } = await pool.query(
         `SELECT v.email, v.phone FROM volunteers v
          JOIN applications a ON a.volunteer_id = v.id
-         WHERE a.event_id = $1 AND a.status NOT IN ('REJECTED')`,
-        [eventId]
+         WHERE a.event_id = $1 AND a.status NOT IN ('REJECTED') AND v.org_id = $2`,
+        [eventId, req.orgId]
       );
       recipientRows = rows;
     } else if (recipientMode === 'select' && Array.isArray(volunteerIds) && volunteerIds.length) {
       const { rows } = await pool.query(
-        'SELECT email, phone FROM volunteers WHERE id = ANY($1)',
-        [volunteerIds]
+        'SELECT email, phone FROM volunteers WHERE id = ANY($1) AND org_id = $2',
+        [volunteerIds, req.orgId]
       );
       recipientRows = rows;
     } else {
-      // 'all' — send to all ACTIVE volunteers
+      // 'all' — send to all ACTIVE volunteers in this org
       const { rows } = await pool.query(
-        "SELECT email, phone FROM volunteers WHERE status = 'ACTIVE'"
+        "SELECT email, phone FROM volunteers WHERE status = 'ACTIVE' AND org_id = $1",
+        [req.orgId]
       );
       recipientRows = rows;
     }
 
     // Resolve custom sender from org settings
-    const orgSettings  = await getOrgSettings();
+    const orgSettings  = await getOrgSettings(req.orgId);
     const emailFrom    = buildFrom(orgSettings);
 
     // Dispatch messages via Resend / Twilio (or log if not configured)
@@ -3167,8 +3574,8 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
     // Record in DB
     const id = 'msg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
     const { rows } = await pool.query(
-      'INSERT INTO sent_messages (id, channel, subject, body, recipients, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [id, channel || 'email', subject || '', body, sent, finalStatus]
+      'INSERT INTO sent_messages (id, org_id, channel, subject, body, recipients, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [id, req.orgId, channel || 'email', subject || '', body, sent, finalStatus]
     );
     logAudit({ req, category: 'message', verb: 'sent',
       resource: `${(channel || 'email').toUpperCase()} Blast`,
@@ -3183,7 +3590,7 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
 
 app.get('/api/messages/login-notifications', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM login_notifications ORDER BY created_at DESC');
+    const { rows } = await pool.query('SELECT * FROM login_notifications WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]);
     res.json(rows.map(mapLoginNotif));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3196,10 +3603,11 @@ app.post('/api/messages/login-notifications', requireAuth, async (req, res) => {
   const id = 'ln_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   try {
     const { rows } = await pool.query(
-      `INSERT INTO login_notifications (id, title, message, type, active, seen_by)
-       VALUES ($1,$2,$3,$4,true,'[]') RETURNING *`,
-      [id, title.trim(), message.trim(), type || 'info']
+      `INSERT INTO login_notifications (id, org_id, title, message, type, active, seen_by)
+       VALUES ($1,$2,$3,$4,$5,true,'[]') RETURNING *`,
+      [id, req.orgId, title.trim(), message.trim(), type || 'info']
     );
+    logAudit({ req, category: 'message', verb: 'created', resource: 'Login Notification', detail: rows[0].title });
     res.json(mapLoginNotif(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3210,10 +3618,11 @@ app.put('/api/messages/login-notifications/:id', requireAuth, async (req, res) =
   const { title, message, type } = req.body;
   try {
     const { rows } = await pool.query(
-      'UPDATE login_notifications SET title=$1, message=$2, type=$3 WHERE id=$4 RETURNING *',
-      [(title || '').trim(), (message || '').trim(), type || 'info', req.params.id]
+      'UPDATE login_notifications SET title=$1, message=$2, type=$3 WHERE id=$4 AND org_id=$5 RETURNING *',
+      [(title || '').trim(), (message || '').trim(), type || 'info', req.params.id, req.orgId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    logAudit({ req, category: 'message', verb: 'updated', resource: 'Login Notification', detail: rows[0].title });
     res.json(mapLoginNotif(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3225,10 +3634,11 @@ app.patch('/api/messages/login-notifications/:id/toggle', requireAuth, async (re
     const { rows } = await pool.query(
       `UPDATE login_notifications SET active = NOT active,
        seen_by = CASE WHEN active THEN seen_by ELSE '[]'::jsonb END
-       WHERE id=$1 RETURNING *`,
-      [req.params.id]
+       WHERE id=$1 AND org_id=$2 RETURNING *`,
+      [req.params.id, req.orgId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    logAudit({ req, category: 'message', verb: rows[0].active ? 'enabled' : 'disabled', resource: 'Login Notification', detail: rows[0].title });
     res.json(mapLoginNotif(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3236,7 +3646,8 @@ app.patch('/api/messages/login-notifications/:id/toggle', requireAuth, async (re
 });
 
 app.delete('/api/messages/login-notifications/:id', requireAuth, async (req, res) => {
-  await pool.query('DELETE FROM login_notifications WHERE id=$1', [req.params.id]);
+  await pool.query('DELETE FROM login_notifications WHERE id=$1 AND org_id=$2', [req.params.id, req.orgId]);
+  logAudit({ req, category: 'message', verb: 'deleted', resource: 'Login Notification', detail: req.params.id });
   res.json({ ok: true });
 });
 
@@ -3261,6 +3672,7 @@ app.put('/api/messages/notif-rules', requireAuth, async (req, res) => {
         [r.volunteerChannel || 'none', r.leaderChannel || 'none', r.adminChannel || 'none', r.event]
       );
     }
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Notification Rules', detail: '' });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3271,8 +3683,8 @@ app.put('/api/messages/notif-rules', requireAuth, async (req, res) => {
 app.get('/api/events/:id/volunteer-count', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT COUNT(*) FROM applications WHERE event_id=$1 AND status NOT IN ('REJECTED')`,
-      [req.params.id]
+      `SELECT COUNT(*) FROM applications WHERE event_id=$1 AND org_id=$2 AND status NOT IN ('REJECTED')`,
+      [req.params.id, req.orgId]
     );
     res.json({ count: parseInt(rows[0].count, 10) });
   } catch (err) {
@@ -3283,13 +3695,13 @@ app.get('/api/events/:id/volunteer-count', requireAuth, async (req, res) => {
 // ===== AUDIT LOG =====
 app.get('/api/audit', requireAuth, async (req, res) => {
   try {
-    const page     = parseIntParam(req.query.page, 1, 1);
-    const limit    = parseIntParam(req.query.limit, 50, 1, 200);
-    const { search, category, verb, userName } = req.query;
+    const page  = parseIntParam(req.query.page, 1, 1);
+    const limit = parseIntParam(req.query.limit, 50, 1, 200);
+    const { search, category, verb, userName, dateFrom, dateTo } = req.query;
 
-    const conditions = [];
-    const params = [];
-    let idx = 1;
+    const conditions = [`org_id = $1`];
+    const params = [req.orgId];
+    let idx = 2;
 
     if (search && typeof search === 'string') {
       const q = `%${search.toLowerCase()}%`;
@@ -3309,8 +3721,17 @@ app.get('/api/audit', requireAuth, async (req, res) => {
       conditions.push(`user_name = $${idx++}`);
       params.push(userName);
     }
+    if (dateFrom && typeof dateFrom === 'string') {
+      conditions.push(`timestamp >= $${idx++}`);
+      params.push(dateFrom);
+    }
+    if (dateTo && typeof dateTo === 'string') {
+      // include the full end day
+      conditions.push(`timestamp < ($${idx++}::date + interval '1 day')`);
+      params.push(dateTo);
+    }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const where = `WHERE ${conditions.join(' AND ')}`;
 
     const [countRes, dataRes, usersRes] = await Promise.all([
       pool.query(`SELECT COUNT(*) FROM audit_logs ${where}`, params),
@@ -3318,27 +3739,29 @@ app.get('/api/audit', requireAuth, async (req, res) => {
         `SELECT * FROM audit_logs ${where} ORDER BY timestamp DESC LIMIT $${idx} OFFSET $${idx+1}`,
         [...params, limit, (page - 1) * limit]
       ),
-      pool.query('SELECT DISTINCT user_name FROM audit_logs ORDER BY user_name ASC'),
+      pool.query('SELECT DISTINCT user_name FROM audit_logs WHERE org_id = $1 ORDER BY user_name ASC', [req.orgId]),
     ]);
 
     const total = parseInt(countRes.rows[0].count, 10);
 
     res.json({
       success: true,
-      data: dataRes.rows.map((r) => ({
-        id:        r.id,
-        timestamp: r.timestamp,
-        userId:    r.user_id,
-        user:      r.user_name,
-        userRole:  r.user_role,
-        category:  r.category,
-        verb:      r.verb,
-        resource:  r.resource,
-        detail:    r.detail,
-        ip:        r.ip || undefined,
-      })),
-      users: usersRes.rows.map((r) => r.user_name),
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      data: {
+        entries: dataRes.rows.map((r) => ({
+          id:        r.id,
+          timestamp: r.timestamp,
+          userId:    r.user_id,
+          user:      r.user_name,
+          userRole:  r.user_role,
+          category:  r.category,
+          verb:      r.verb,
+          resource:  r.resource,
+          detail:    r.detail,
+          ip:        r.ip || undefined,
+        })),
+        users: usersRes.rows.map((r) => r.user_name),
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      },
     });
   } catch (err) {
     console.error('GET /api/audit error:', err.message);
@@ -3373,15 +3796,16 @@ async function processAutoReminders() {
 
     const now = new Date();
     for (const reminder of reminders) {
+      const reminderOrgId = reminder.org_id || 'admin-1';
       const triggerMs   = parseFloat(reminder.trigger_hours) * 60 * 60 * 1000;
       const windowStart = new Date(now.getTime() + triggerMs - 8 * 60 * 1000).toISOString();
       const windowEnd   = new Date(now.getTime() + triggerMs + 8 * 60 * 1000).toISOString();
 
       const { rows: events } = await pool.query(
         `SELECT id, title FROM events
-         WHERE status IN ('PUBLISHED','UPCOMING')
-           AND start_date >= $1 AND start_date <= $2`,
-        [windowStart, windowEnd]
+         WHERE org_id = $1 AND status IN ('PUBLISHED','UPCOMING')
+           AND start_date >= $2 AND start_date <= $3`,
+        [reminderOrgId, windowStart, windowEnd]
       );
 
       for (const event of events) {
@@ -3398,12 +3822,13 @@ async function processAutoReminders() {
           ({ rows: vols } = await pool.query(
             `SELECT v.email, v.phone FROM volunteers v
              JOIN applications a ON a.volunteer_id = v.id
-             WHERE a.event_id = $1 AND a.status NOT IN ('REJECTED')`,
-            [event.id]
+             WHERE a.event_id = $1 AND a.status NOT IN ('REJECTED') AND v.org_id = $2`,
+            [event.id, reminderOrgId]
           ));
         } else {
           ({ rows: vols } = await pool.query(
-            "SELECT email, phone FROM volunteers WHERE status = 'ACTIVE'"
+            "SELECT email, phone FROM volunteers WHERE status = 'ACTIVE' AND org_id = $1",
+            [reminderOrgId]
           ));
         }
         if (!vols.length) continue;
@@ -3412,15 +3837,15 @@ async function processAutoReminders() {
         let msgBody = reminder.custom_body || '';
         if (!msgBody && reminder.template_id) {
           const { rows: tmpl } = await pool.query(
-            'SELECT body FROM message_templates WHERE id = $1',
-            [reminder.template_id]
+            'SELECT body FROM message_templates WHERE id = $1 AND org_id = $2',
+            [reminder.template_id, reminderOrgId]
           );
           if (tmpl.length) msgBody = tmpl[0].body;
         }
         if (!msgBody) msgBody = `Reminder: "${event.title}" is coming up soon!`;
         msgBody = msgBody.replace(/\{event_title\}/g, event.title);
 
-        const orgCfg   = await getOrgSettings();
+        const orgCfg   = await getOrgSettings(reminder.org_id || 'admin-1');
         const emailFrom = buildFrom(orgCfg);
         await dispatchBulk(reminder.channel, vols, `Reminder: ${event.title}`, msgBody, emailFrom);
 
@@ -3440,7 +3865,7 @@ async function processAutoReminders() {
 // ===== STARTUP =====
 async function start() {
   try {
-    await initDb();
+    await initializeDatabase();
     app.listen(PORT, () => {
       console.log(`[Server] VolunteerFlow API running on port ${PORT} (${NODE_ENV})`);
       if (NODE_ENV !== 'test') {
