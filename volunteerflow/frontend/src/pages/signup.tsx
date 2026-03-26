@@ -317,6 +317,26 @@ export default function SignupPage() {
     }
   };
 
+  const handleWizardFinish = async () => {
+    setWizardSaving(true);
+    try {
+      const token = localStorage.getItem('vf_token');
+      const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
+      await fetch(`${base}/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(wizard),
+      });
+    } catch {
+      // silent fail — user can complete profile in Settings → Organization
+    } finally {
+      router.push('/');
+    }
+  };
+
   const VALUE_ITEMS = [
     { icon: Zap, color: 'rgba(16,185,129,0.15)', iconColor: '#10b981', title: '30-day free trial', desc: 'Full access to all Pro features. No commitment.' },
     { icon: Clock, color: 'rgba(59,130,246,0.15)', iconColor: '#60a5fa', title: 'Set up in 15 minutes', desc: 'Import your volunteers and create your first event fast.' },
