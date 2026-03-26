@@ -52,7 +52,7 @@ function staffHelpRouter(pool) {
     try {
       const { id } = req.params;
       const { type, title, body, category, sort_order, published } = req.body;
-      if (type !== undefined && !['faq', 'article'].includes(type)) {
+      if (!['faq', 'article'].includes(type)) {
         return res.status(400).json({ error: 'type must be faq or article' });
       }
       if (!title || !title.trim()) {
