@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { StaffLayout } from '@/components/staff/StaffLayout';
 import { staffApi, StaffApiError } from '@/lib/staffApi';
-import { Plus, Edit2, Trash2, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Edit2, Trash2, X } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -211,13 +211,10 @@ export default function StaffHelpPage() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [modal, setModal] = useState<{ open: boolean; item?: HelpItem }>({ open: false });
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadItems();
-  }, []);
-
-  async function loadItems() {
+  const loadItems = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -228,7 +225,11 @@ export default function StaffHelpPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    loadItems();
+  }, [loadItems]);
 
   async function togglePublished(item: HelpItem) {
     setTogglingId(item.id);
@@ -243,16 +244,19 @@ export default function StaffHelpPage() {
     }
   }
 
-  async function confirmDelete(id: number) {
+  const confirmDelete = async (id: number) => {
+    setDeleting(true);
     try {
       await staffApi.delete(`/help/${id}`);
-      setItems(prev => prev.filter(i => i.id !== id));
+      setItems((prev) => prev.filter((i) => i.id !== id));
       setDeleteId(null);
     } catch {
-      setDeleteId(null);
       setError('Failed to delete item. Please try again.');
+      setDeleteId(null);
+    } finally {
+      setDeleting(false);
     }
-  }
+  };
 
   function onSaved(saved: HelpItem) {
     setItems(prev => {
@@ -418,10 +422,11 @@ export default function StaffHelpPage() {
               </button>
               <button
                 type="button"
-                onClick={() => confirmDelete(deleteId)}
-                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-lg transition-colors"
+                onClick={() => confirmDelete(deleteId!)}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
               >
-                Delete
+                {deleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>
           </div>
