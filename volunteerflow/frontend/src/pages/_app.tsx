@@ -41,8 +41,6 @@ const ACCENT_PALETTES: Record<string, Record<string, string>> = {
 function PlanLoader() {
   const { setPlan } = usePlan();
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('vf_token') : null;
-    if (!token) return;
     api.get<{ plan: string }>('/billing/plan')
       .then(res => {
         const plan = res?.plan;
