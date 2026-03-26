@@ -218,6 +218,7 @@ const styles = `
 
   @keyframes check-pop { 0% { transform: scale(0); } 70% { transform: scale(1.1); } 100% { transform: scale(1); } }
   .check-pop { animation: check-pop 0.4s ease 0.1s both; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 `;
 
 interface FormErrors {
@@ -390,25 +391,165 @@ export default function SignupPage() {
           <div className="signup-form-wrap">
 
             {success ? (
-              <div className="success-screen">
-                <div className="success-icon check-pop">
-                  <Check className="w-8 h-8 text-white" strokeWidth={3} />
+              <div>
+                {/* ── Wizard header: progress dots + skip ── */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {([1, 2, 3] as const).map((n, i) => (
+                      <span key={n} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {i > 0 && (
+                          <div className={`sp-step-line${wizardStep > n - 1 ? ' done' : ''}`} style={{ width: 28 }} />
+                        )}
+                        <div className={`sp-step-dot${wizardStep === n ? ' active' : wizardStep > n ? ' done' : ''}`}>
+                          {wizardStep > n ? <Check className="w-3 h-3" strokeWidth={3} /> : n}
+                        </div>
+                      </span>
+                    ))}
+                    <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 6, fontWeight: 500 }}>
+                      Step {wizardStep} of 3
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => router.push('/')}
+                    style={{ fontSize: 13, color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
+                  >
+                    Skip setup →
+                  </button>
                 </div>
-                <h2 className="sp-display" style={{ fontSize: 28, fontWeight: 600, color: '#0f172a', marginBottom: 10 }}>
-                  You're all set!
-                </h2>
-                <p style={{ fontSize: 15, color: '#64748b', lineHeight: 1.65, marginBottom: 24 }}>
-                  Welcome to VolunteerFlow. Taking you to your dashboard…
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left', background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 12, padding: 20 }}>
-                  {['Import or invite your volunteers', 'Create your first event', 'Set up your application form'].map((step, i) => (
-                    <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'white' }}>{i + 1}</span>
-                      </div>
-                      <span style={{ fontSize: 14, color: '#065f46', fontWeight: 500 }}>{step}</span>
+
+                {/* ── Step header ── */}
+                <div style={{ marginBottom: 20 }}>
+                  <h2 className="sp-display" style={{ fontSize: 22, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>
+                    {wizardStep === 1 ? 'Your Organization' : wizardStep === 2 ? 'Contact Info' : 'Legal & Location'}
+                  </h2>
+                  <p style={{ fontSize: 13, color: '#64748b' }}>
+                    {wizardStep === 1
+                      ? 'Tell us a bit about your org'
+                      : wizardStep === 2
+                      ? 'How can people reach your organization?'
+                      : 'Optional — used for receipts and compliance'}
+                  </p>
+                </div>
+
+                {/* ── Step 1: org name + description ── */}
+                {wizardStep === 1 && (
+                  <>
+                    <div className="sp-field">
+                      <label className="sp-label">Organization Name</label>
+                      <input
+                        className="sp-input"
+                        type="text"
+                        placeholder="Green Future Foundation"
+                        value={wizard.orgName}
+                        onChange={(e) => setWizard((w) => ({ ...w, orgName: e.target.value }))}
+                      />
                     </div>
-                  ))}
+                    <div className="sp-field">
+                      <label className="sp-label">Description</label>
+                      <textarea
+                        className="sp-input"
+                        placeholder="What does your organization do?"
+                        value={wizard.description}
+                        onChange={(e) => setWizard((w) => ({ ...w, description: e.target.value }))}
+                        rows={3}
+                        style={{ resize: 'vertical', lineHeight: 1.5 }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* ── Step 2: website + email + phone ── */}
+                {wizardStep === 2 && (
+                  <>
+                    <div className="sp-field">
+                      <label className="sp-label">Website</label>
+                      <input
+                        className="sp-input"
+                        type="text"
+                        placeholder="https://yourorg.org"
+                        value={wizard.website}
+                        onChange={(e) => setWizard((w) => ({ ...w, website: e.target.value }))}
+                      />
+                    </div>
+                    <div className="sp-field">
+                      <label className="sp-label">Contact Email</label>
+                      <input
+                        className="sp-input"
+                        type="email"
+                        placeholder="hello@yourorg.org"
+                        value={wizard.orgEmail}
+                        onChange={(e) => setWizard((w) => ({ ...w, orgEmail: e.target.value }))}
+                      />
+                    </div>
+                    <div className="sp-field">
+                      <label className="sp-label">Phone Number</label>
+                      <input
+                        className="sp-input"
+                        type="tel"
+                        placeholder="+1 (555) 000-0000"
+                        value={wizard.phone}
+                        onChange={(e) => setWizard((w) => ({ ...w, phone: e.target.value }))}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* ── Step 3: tax ID + address ── */}
+                {wizardStep === 3 && (
+                  <>
+                    <div className="sp-field">
+                      <label className="sp-label">Tax ID / EIN</label>
+                      <input
+                        className="sp-input"
+                        type="text"
+                        placeholder="12-3456789"
+                        value={wizard.taxId}
+                        onChange={(e) => setWizard((w) => ({ ...w, taxId: e.target.value }))}
+                      />
+                    </div>
+                    <div className="sp-field">
+                      <label className="sp-label">Address</label>
+                      <textarea
+                        className="sp-input"
+                        placeholder="123 Main St, City, State 12345"
+                        value={wizard.address}
+                        onChange={(e) => setWizard((w) => ({ ...w, address: e.target.value }))}
+                        rows={3}
+                        style={{ resize: 'vertical', lineHeight: 1.5 }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* ── Footer: back + next/finish ── */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 24 }}>
+                  <div>
+                    {wizardStep > 1 && (
+                      <button
+                        onClick={() => setWizardStep((s) => (s - 1) as 1 | 2 | 3)}
+                        style={{ fontSize: 14, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', padding: '10px 0' }}
+                      >
+                        ← Back
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    className="sp-submit"
+                    style={{ width: 'auto', paddingLeft: 32, paddingRight: 32, marginTop: 0 }}
+                    onClick={wizardStep < 3 ? () => setWizardStep((s) => (s + 1) as 1 | 2 | 3) : handleWizardFinish}
+                    disabled={wizardSaving}
+                  >
+                    {wizardSaving ? (
+                      <>
+                        <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                        Saving…
+                      </>
+                    ) : wizardStep < 3 ? (
+                      <>Next <ArrowRight className="w-4 h-4" /></>
+                    ) : (
+                      <>Finish <ArrowRight className="w-4 h-4" /></>
+                    )}
+                  </button>
                 </div>
               </div>
             ) : (
@@ -593,7 +734,6 @@ export default function SignupPage() {
                   ))}
                 </div>
 
-                <style dangerouslySetInnerHTML={{ __html: `@keyframes spin { to { transform: rotate(360deg); } }` }} />
               </>
             )}
           </div>
