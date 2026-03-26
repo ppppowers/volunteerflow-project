@@ -39,6 +39,7 @@ export type FeatureKey =
   | 'priority_support'
   | 'custom_integrations'
   | 'sla_guarantee'
+  | 'qr_codes'
   | 'qr_analytics';
 
 export type FeatureValue = boolean | number | string;
@@ -74,6 +75,7 @@ export interface PlanFeatures {
   priority_support: boolean;
   custom_integrations: boolean;
   sla_guarantee: boolean;
+  qr_codes: boolean;
   qr_analytics: boolean;
 }
 
@@ -160,8 +162,9 @@ export const FEATURE_GROUPS: FeatureGroup[] = [
       { key: 'automated_reminders', label: 'Automated reminders', tooltip: 'Scheduled reminders for upcoming events and tasks' },
       { key: 'message_templates', label: 'Message templates', tooltip: 'Reusable email and SMS templates for your communications' },
       { key: 'csv_export', label: 'CSV data export', tooltip: 'Export volunteer and event data to spreadsheets' },
-      { key: 'mobile_app', label: 'Mobile app', tooltip: 'Manage volunteers and events from your phone' },
+      { key: 'mobile_app', label: 'Mobile-friendly', tooltip: 'Works on any phone or tablet — no app download needed' },
       { key: 'event_notifications', label: 'Event notifications', tooltip: 'Automatic alerts when events are created or updated' },
+      { key: 'qr_codes', label: 'QR codes', tooltip: 'Generate QR codes for events and volunteer sign-up links' },
     ],
   },
   {
@@ -175,6 +178,7 @@ export const FEATURE_GROUPS: FeatureGroup[] = [
       { key: 'file_library', label: 'File library', tooltip: 'Central repository for documents, waivers, and training materials' },
       { key: 'data_import', label: 'Import data', tooltip: 'Bulk import volunteers, past events, and hours from CSV or Excel' },
       { key: 'role_permissions', label: 'Job permissions', tooltip: 'Assign granular role-based access to coordinators and staff' },
+      { key: 'qr_analytics', label: 'QR code tracking & analytics', tooltip: 'See scan counts, check-in rates, and attendance trends per event' },
     ],
   },
   {
@@ -201,21 +205,21 @@ export const PLANS: Record<PlanId, Plan> = {
   discover: {
     id: 'discover',
     name: 'Discover',
-    tagline: '$490 / year',
+    tagline: '$600 / year',
     description: 'Everything you need to launch your volunteer program and start making an impact.',
-    monthlyPrice: 49,
-    yearlyPrice: 490,
+    monthlyPrice: 59,
+    yearlyPrice: 600,
     highlighted: false,
     ctaLabel: 'Start free trial',
     ctaVariant: 'outline',
     limits: {
-      adminUsers: 2,
+      adminUsers: 5,
       volunteers: 'unlimited',
       eventsPerMonth: 'unlimited',
       storageGb: 5,
     },
     features: {
-      admin_users: 2,
+      admin_users: 5,
       volunteers: 'unlimited',
       events: 'unlimited',
       email_notifications: true,
@@ -245,6 +249,7 @@ export const PLANS: Record<PlanId, Plan> = {
       priority_support: false,
       custom_integrations: false,
       sla_guarantee: false,
+      qr_codes: true,
       qr_analytics: false,
     },
   },
@@ -252,22 +257,22 @@ export const PLANS: Record<PlanId, Plan> = {
   grow: {
     id: 'grow',
     name: 'Grow',
-    tagline: '$1,490 / year',
+    tagline: '$2,500 / year',
     description: 'Advanced tools for growing nonprofits ready to professionalize their volunteer operations.',
-    monthlyPrice: 149,
-    yearlyPrice: 1490,
+    monthlyPrice: 249,
+    yearlyPrice: 2500,
     highlighted: true,
     badge: 'Most Popular',
     ctaLabel: 'Start free trial',
     ctaVariant: 'primary',
     limits: {
-      adminUsers: 10,
+      adminUsers: 15,
       volunteers: 'unlimited',
       eventsPerMonth: 'unlimited',
       storageGb: 50,
     },
     features: {
-      admin_users: 10,
+      admin_users: 15,
       volunteers: 'unlimited',
       events: 'unlimited',
       email_notifications: true,
@@ -297,6 +302,7 @@ export const PLANS: Record<PlanId, Plan> = {
       priority_support: false,
       custom_integrations: false,
       sla_guarantee: false,
+      qr_codes: true,
       qr_analytics: true,
     },
   },
@@ -348,6 +354,7 @@ export const PLANS: Record<PlanId, Plan> = {
       priority_support: true,
       custom_integrations: true,
       sla_guarantee: true,
+      qr_codes: true,
       qr_analytics: true,
     },
   },

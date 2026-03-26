@@ -1,5 +1,6 @@
 'use strict';
 const { randomUUID } = require('crypto');
+const jwt = require('jsonwebtoken');
 const { requireStaffAuth, requirePermission, logStaffAudit } = require('./middleware');
 
 function staffSupportRouter(pool) {
@@ -114,6 +115,52 @@ function staffSupportRouter(pool) {
         res.json({ ok: true });
       } catch (err) {
         console.error('[staff/support] heartbeat error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  );
+
+  // POST /impersonate — generate a temporary org JWT for browsing the org's portal
+  router.post('/impersonate',
+    requireStaffAuth(pool),
+    requirePermission('support.view_mode', pool),
+    async (req, res) => {
+      try {
+        const { orgId, supportSessionId } = req.body;
+        if (!orgId) return res.status(400).json({ error: 'orgId is required' });
+
+        // Verify there is an active support session for this org
+        const sessionCheck = await pool.query(
+          'SELECT id FROM support_sessions WHERE id = $1 AND staff_user_id = $2 AND org_id = $3 AND is_active = true',
+          [supportSessionId, req.staff.staffId, orgId]
+        );
+        if (!sessionCheck.rows[0]) {
+          return res.status(403).json({ error: 'No active support session for this org' });
+        }
+
+        const orgResult = await pool.query('SELECT id, email, full_name, org_name, role FROM users WHERE id = $1', [orgId]);
+        if (!orgResult.rows[0]) return res.status(404).json({ error: 'Org not found' });
+        const org = orgResult.rows[0];
+
+        const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+        const orgToken = jwt.sign(
+          { sub: org.id, email: org.email, fullName: org.full_name, role: org.role, _supportImpersonation: true, _supportSessionId: supportSessionId },
+          JWT_SECRET,
+          { expiresIn: '2h' }
+        );
+
+        logStaffAudit(pool, {
+          staffUserId: req.staff.staffId, staffUserName: req.staff.name, staffRole: req.staff.roleId,
+          targetOrgId: orgId, targetOrgName: org.org_name,
+          category: 'support_view', action: 'impersonated',
+          resourceType: 'org', resourceId: orgId,
+          ipAddress: req.ip, staffSessionId: req.staff.sessionId,
+          supportSessionId,
+        }).catch(() => {});
+
+        res.json({ orgToken });
+      } catch (err) {
+        console.error('[staff/support] impersonate error:', err.message);
         res.status(500).json({ error: 'Internal server error' });
       }
     }

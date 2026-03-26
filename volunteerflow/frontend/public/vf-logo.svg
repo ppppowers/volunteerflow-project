@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <!-- White background so it looks clean in any browser tab -->
+  <rect width="200" height="200" fill="white"/>
+  <defs>
+    <!-- Circle border: teal → green -->
+    <linearGradient id="g-border" x1="30" y1="30" x2="170" y2="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#12C2B2"/>
+      <stop offset="100%" stop-color="#4DCB6A"/>
+    </linearGradient>
+    <!-- Left wing: blue → teal -->
+    <linearGradient id="g-wing" x1="36" y1="62" x2="112" y2="148" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#009ADF"/>
+      <stop offset="50%" stop-color="#00BDB5"/>
+      <stop offset="100%" stop-color="#00BCAD"/>
+    </linearGradient>
+    <!-- Left wing shadow -->
+    <linearGradient id="g-wing-sh" x1="44" y1="88" x2="114" y2="148" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#006FA8"/>
+      <stop offset="100%" stop-color="#008F8F"/>
+    </linearGradient>
+    <!-- Right leaves: teal → green -->
+    <linearGradient id="g-leaves" x1="80" y1="80" x2="170" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00BDB5"/>
+      <stop offset="100%" stop-color="#4DCB6A"/>
+    </linearGradient>
+    <!-- Left head: bright cyan -->
+    <radialGradient id="g-lhead" cx="36%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#30E2FA"/>
+      <stop offset="100%" stop-color="#009ADF"/>
+    </radialGradient>
+    <!-- Right head: bright green -->
+    <radialGradient id="g-rhead" cx="36%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#82EE58"/>
+      <stop offset="100%" stop-color="#32B855"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ── Circle border ──────────────────────────────────── -->
+  <circle cx="100" cy="100" r="88" stroke="url(#g-border)" stroke-width="5"/>
+
+  <!-- ── LEFT FIGURE ───────────────────────────────────── -->
+
+  <!-- Wing depth/shadow (translated 3px down-right) -->
+  <path d="M 38 90 C 40 78 50 70 60 80
+           C 72 92 84 110 93 126
+           C 98 134 104 140 108 145"
+        stroke="url(#g-wing-sh)" stroke-width="28"
+        stroke-linecap="round" fill="none"
+        opacity="0.28" transform="translate(3,4)"/>
+
+  <!-- Wing main body -->
+  <path d="M 38 90 C 40 78 50 70 60 80
+           C 72 92 84 110 93 126
+           C 98 134 104 140 108 145"
+        stroke="url(#g-wing)" stroke-width="28"
+        stroke-linecap="round" fill="none"/>
+
+  <!-- Wing top-surface highlight -->
+  <path d="M 38 90 C 40 78 50 70 60 80
+           C 72 92 84 110 93 126
+           C 98 134 104 140 108 145"
+        stroke="rgba(255,255,255,0.20)" stroke-width="11"
+        stroke-linecap="round" fill="none"
+        transform="translate(-2,-2)"/>
+
+  <!-- Left head -->
+  <circle cx="78" cy="62" r="10" fill="url(#g-lhead)"/>
+
+  <!-- ── RIGHT FIGURE ──────────────────────────────────── -->
+
+  <!-- Leaf 1 (top) — wide at left, pointed right -->
+  <path d="M 94 72 C 87 72 83 75.5 83 80 C 83 84.5 87 88 94 88
+           C 126 88 156 85 165 79
+           C 156 73 126 72 94 72 Z"
+        fill="url(#g-leaves)"/>
+
+  <!-- Leaf 2 (middle) -->
+  <path d="M 97 88 C 90 88 86 91.5 86 96 C 86 100.5 90 104 97 104
+           C 129 104 159 101 168 95
+           C 159 89 129 88 97 88 Z"
+        fill="url(#g-leaves)"/>
+
+  <!-- Leaf 3 (bottom) -->
+  <path d="M 100 104 C 93 104 89 107.5 89 112 C 89 116.5 93 120 100 120
+           C 132 120 161 117 166 111
+           C 161 105 132 104 100 104 Z"
+        fill="url(#g-leaves)"/>
+
+  <!-- Right head -->
+  <circle cx="128" cy="60" r="10.5" fill="url(#g-rhead)"/>
+</svg>

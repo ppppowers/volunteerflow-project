@@ -50,6 +50,7 @@ interface Theme {
     text: string;
     subtext: string;
     border: string;
+    heroGradient?: string;
   };
 }
 
@@ -183,6 +184,115 @@ const THEMES: Theme[] = [
       text: '#4c0519',
       subtext: '#9f1239',
       border: '#fecdd3',
+    },
+  },
+  // ── Gradient themes ──────────────────────────────────────────────────────────
+  {
+    id: 'aurora',
+    name: 'Aurora',
+    description: 'Northern lights gradient on deep navy. Striking for science or environmental orgs.',
+    badge: 'Gradient',
+    colors: {
+      bg: '#030712',
+      header: '#0c1445',
+      headerText: '#a5f3fc',
+      accent: '#06b6d4',
+      accentText: '#ffffff',
+      card: '#0f172a',
+      text: '#e0f2fe',
+      subtext: '#7dd3fc',
+      border: '#1e3a5f',
+      heroGradient: 'linear-gradient(135deg, #0c1445 0%, #064e3b 45%, #0f2d48 100%)',
+    },
+  },
+  {
+    id: 'golden_hour',
+    name: 'Golden Hour',
+    description: 'Amber to rose sunset gradient. Warm and vibrant for community or creative orgs.',
+    badge: 'Gradient',
+    colors: {
+      bg: '#fffbeb',
+      header: '#b45309',
+      headerText: '#ffffff',
+      accent: '#d97706',
+      accentText: '#ffffff',
+      card: '#ffffff',
+      text: '#1c1917',
+      subtext: '#78350f',
+      border: '#fde68a',
+      heroGradient: 'linear-gradient(135deg, #f59e0b 0%, #f97316 55%, #db2777 100%)',
+    },
+  },
+  {
+    id: 'galaxy',
+    name: 'Midnight Galaxy',
+    description: 'Deep space purples and indigo gradient. Dramatic for tech, arts, or youth programs.',
+    badge: 'Gradient',
+    colors: {
+      bg: '#09090f',
+      header: '#150b2e',
+      headerText: '#e9d5ff',
+      accent: '#a855f7',
+      accentText: '#ffffff',
+      card: '#130d24',
+      text: '#f3e8ff',
+      subtext: '#c084fc',
+      border: '#2e1065',
+      heroGradient: 'linear-gradient(135deg, #150b2e 0%, #4c1d95 50%, #1e1b4b 100%)',
+    },
+  },
+  {
+    id: 'coral_reef',
+    name: 'Coral Reef',
+    description: 'Coral to turquoise gradient. Bright and tropical for environmental or coastal causes.',
+    badge: 'Gradient',
+    colors: {
+      bg: '#f0fdfa',
+      header: '#0f766e',
+      headerText: '#ffffff',
+      accent: '#0d9488',
+      accentText: '#ffffff',
+      card: '#ffffff',
+      text: '#0f172a',
+      subtext: '#0f766e',
+      border: '#b2f5ea',
+      heroGradient: 'linear-gradient(135deg, #f97316 0%, #ef4444 42%, #0d9488 100%)',
+    },
+  },
+  {
+    id: 'neon_city',
+    name: 'Neon City',
+    description: 'Electric pink to violet on dark. Bold for music, arts, or youth events.',
+    badge: 'Gradient',
+    colors: {
+      bg: '#09090f',
+      header: '#18041a',
+      headerText: '#fce7f3',
+      accent: '#ec4899',
+      accentText: '#ffffff',
+      card: '#120519',
+      text: '#fdf4ff',
+      subtext: '#f0abfc',
+      border: '#3b0764',
+      heroGradient: 'linear-gradient(135deg, #db2777 0%, #7c3aed 50%, #2563eb 100%)',
+    },
+  },
+  {
+    id: 'mountain_mist',
+    name: 'Mountain Mist',
+    description: 'Slate to stone gradient. Calm and professional for wellness or corporate programs.',
+    badge: 'Gradient',
+    colors: {
+      bg: '#f8fafc',
+      header: '#334155',
+      headerText: '#f1f5f9',
+      accent: '#475569',
+      accentText: '#ffffff',
+      card: '#ffffff',
+      text: '#1e293b',
+      subtext: '#64748b',
+      border: '#e2e8f0',
+      heroGradient: 'linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%)',
     },
   },
 ];
@@ -328,7 +438,7 @@ function buildThemeHTML(theme: Theme, orgName: string): string {
     header { background: ${c.header}; color: ${c.headerText}; padding: 20px 36px; display: flex; align-items: center; justify-content: space-between; }
     header h1 { font-size: 20px; font-weight: 700; }
     header p { font-size: 12px; opacity: 0.75; margin-top: 2px; }
-    .hero { background: ${c.header}; color: ${c.headerText}; padding: 52px 36px; text-align: center; }
+    .hero { background: ${c.heroGradient ?? c.header}; color: ${c.headerText}; padding: 52px 36px; text-align: center; }
     .hero h2 { font-size: 28px; font-weight: 800; margin-bottom: 10px; }
     .hero p { font-size: 15px; opacity: 0.8; margin-bottom: 24px; }
     .hero button { background: ${c.card}; color: ${c.accent}; border: none; padding: 11px 26px; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; }
@@ -389,7 +499,7 @@ function ThemeMiniPreview({ theme }: { theme: Theme }) {
         <div style={{ color: c.headerText, fontSize: 7, opacity: 0.7 }}>3 events</div>
       </div>
       {/* Hero strip */}
-      <div style={{ background: c.header, padding: '10px', textAlign: 'center', borderBottom: `1px solid ${c.border}` }}>
+      <div style={{ background: c.heroGradient ?? c.header, padding: '10px', textAlign: 'center', borderBottom: `1px solid ${c.border}` }}>
         <div style={{ color: c.headerText, fontSize: 8, fontWeight: 700, marginBottom: 4 }}>Make a Difference Today</div>
         <div style={{ display: 'inline-block', background: c.card, color: c.accent, fontSize: 7, fontWeight: 600, padding: '3px 8px', borderRadius: 4 }}>
           Browse

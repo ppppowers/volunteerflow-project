@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { Heart, CheckCircle, ChevronLeft, Camera, X as XIcon } from 'lucide-react';
+import { CheckCircle, ChevronLeft, Camera, X as XIcon } from 'lucide-react';
 import { signupFormConfigs, type FormField } from '@/lib/signupForms';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -193,22 +193,49 @@ export default function ApplyPage() {
 
   const [values, setValues] = useState<Record<string, string>>({});
 
-  // Reset form values whenever the field list changes
+  // Reset form values whenever the field list changes; inject URL prefill when router is ready
   useEffect(() => {
-    setValues(Object.fromEntries(activeFields.map((f) => [f.id, ''])));
-  }, [activeFields]);
+    const base = Object.fromEntries(activeFields.map((f) => [f.id, '']));
+    if (router.isReady) {
+      const { name, email, phone } = router.query;
+      if (name)  base.name  = String(name);
+      if (email) base.email = String(email);
+      if (phone) base.phone = String(phone);
+    }
+    setValues(base);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFields, router.isReady]);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const setValue = (id: string, v: string) => setValues((prev) => ({ ...prev, [id]: v }));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setTimeout(() => {
+
+    const templateId = router.isReady ? (router.query.form as string | undefined) : undefined;
+    const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
+
+    try {
+      await fetch(`${apiBase}/form-submissions/public`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId: templateId || undefined,
+          name: values.name || '',
+          email: values.email || '',
+          phone: values.phone || '',
+          answers: values,
+          applicantType: type,
+        }),
+      });
+    } catch {
+      // Proceed to success screen even if offline — don't block the applicant
+    } finally {
       setSubmitting(false);
       setSubmitted(true);
-    }, 1200);
+    }
   };
 
   // Pair consecutive half-width fields into 2-col rows
@@ -236,9 +263,7 @@ export default function ApplyPage() {
       {/* Top bar */}
       <header className="p-5 flex items-center justify-between max-w-3xl mx-auto w-full">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center" aria-hidden="true">
-            <Heart className="w-4 h-4 text-white" />
-          </div>
+          <img src="/vf-logo.png" className="w-12 h-12" alt="" aria-hidden="true" />
           <span className="text-white font-bold text-lg">VolunteerFlow</span>
         </div>
         <button

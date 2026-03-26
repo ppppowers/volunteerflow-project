@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { Shield, Lock, ArrowLeft } from 'lucide-react';
@@ -33,7 +34,7 @@ function AccessDenied() {
           <span className="text-amber-400 font-semibold">super_admin</span> role to access this portal.
         </p>
         <Link
-          href="/auth"
+          href="/landing"
           className="inline-flex items-center gap-2 px-5 py-2.5 bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm font-medium rounded-lg hover:bg-zinc-700 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Back to Login
@@ -42,6 +43,15 @@ function AccessDenied() {
     </div>
   );
 }
+
+// ─── Production guard ─────────────────────────────────────────────────────────
+
+export const getServerSideProps: GetServerSideProps = async () => {
+  if (process.env.NODE_ENV === 'production') {
+    return { notFound: true };
+  }
+  return { props: {} };
+};
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 

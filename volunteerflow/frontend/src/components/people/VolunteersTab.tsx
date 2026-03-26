@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import Card from '@/components/Card';
+import { api } from '@/lib/api';
 import {
   Search,
   Users,
@@ -10,12 +11,13 @@ import {
   Calendar,
   Star,
   ChevronRight,
+  Link2,
+  Copy,
+  Check,
+  FileText,
 } from 'lucide-react';
-import { mockVolunteers } from '../../pages/volunteers';
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
-
-const TODAY = new Date('2026-03-18');
 
 const inputCls =
   'w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none placeholder-neutral-400 dark:placeholder-neutral-500';
@@ -31,23 +33,99 @@ function getInitials(name: string): string {
     .join('');
 }
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface VolunteerRow {
+  id: string;
+  name: string;
+  volunteerId: string;
+  avatar: string;
+  status: 'active' | 'inactive' | 'pending';
+  hoursContributed: number;
+  eventsCompleted: number;
+  rating: number;
+  skills: string[];
+}
+
+interface ApiVolunteerItem {
+  id: string;
+  firstName: string;
+  lastName: string;
+  avatar?: string;
+  skills?: string[];
+  hoursContributed?: number;
+  status: string;
+}
+
+function mapVolunteer(v: ApiVolunteerItem): VolunteerRow {
+  const statusRaw = v.status?.toLowerCase();
+  const status: VolunteerRow['status'] =
+    statusRaw === 'inactive' ? 'inactive' : statusRaw === 'pending' ? 'pending' : 'active';
+  return {
+    id: v.id,
+    name: `${v.firstName} ${v.lastName}`.trim(),
+    volunteerId: `VOL-${v.id}`,
+    avatar: v.avatar ?? '',
+    status,
+    hoursContributed: v.hoursContributed ?? 0,
+    eventsCompleted: 0,
+    rating: 0,
+    skills: v.skills ?? [],
+  };
+}
+
 // ─── VolunteersTab ─────────────────────────────────────────────────────────────
 
-export function VolunteersTab() {
+interface TemplateOption { id: string; name: string; }
+
+export function VolunteersTab({
+  templates = [],
+  linkedFormId = null,
+  onLinkForm,
+}: {
+  templates?: TemplateOption[];
+  linkedFormId?: string | null;
+  onLinkForm?: (formId: string | null) => void;
+}) {
+  const [volunteers, setVolunteers] = useState<VolunteerRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'pending'>('all');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    api.get<ApiVolunteerItem[]>('/volunteers?limit=100')
+      .then((data) => setVolunteers(data.map(mapVolunteer)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const signupUrl = (() => {
+    const base = typeof window !== 'undefined' ? window.location.origin : '';
+    const params = new URLSearchParams();
+    if (linkedFormId) params.set('form', linkedFormId);
+    const qs = params.toString();
+    return `${base}/apply${qs ? `?${qs}` : ''}`;
+  })();
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(signupUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return mockVolunteers.filter((v) => {
+    return volunteers.filter((v) => {
       const matchesSearch =
         !q ||
         v.name.toLowerCase().includes(q) ||
-        v.email.toLowerCase().includes(q) ||
         v.skills.some((s) => s.toLowerCase().includes(q));
       const matchesStatus = statusFilter === 'all' || v.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [search, statusFilter]);
+  }, [search, statusFilter, volunteers]);
 
   const statusBadge = (status: 'active' | 'inactive' | 'pending') => {
     if (status === 'active')
@@ -59,6 +137,40 @@ export function VolunteersTab() {
 
   return (
     <div className="space-y-4">
+      {/* Volunteer signup link banner */}
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border"
+           style={{ background: '#6366f110', borderColor: '#6366f140' }}>
+        <Link2 className="w-4 h-4 flex-shrink-0" style={{ color: '#6366f1' }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Volunteer Signup Link</p>
+        </div>
+        {/* Form selector */}
+        {onLinkForm && (
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <FileText className="w-3.5 h-3.5 text-neutral-400" />
+            <select
+              value={linkedFormId ?? ''}
+              onChange={(e) => onLinkForm(e.target.value || null)}
+              className="text-xs border border-neutral-300 dark:border-neutral-600 rounded-lg px-2 py-1.5 bg-white dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer"
+            >
+              <option value="">No form linked</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border rounded-lg flex-shrink-0 transition-colors"
+          style={copied
+            ? { background: '#6366f120', color: '#6366f1', borderColor: '#6366f140' }
+            : { color: '#6366f1', borderColor: '#6366f170', background: 'transparent' }}
+        >
+          {copied ? <><Check className="w-3.5 h-3.5" />Copied!</> : <><Copy className="w-3.5 h-3.5" />Copy</>}
+        </button>
+      </div>
+
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
@@ -84,10 +196,29 @@ export function VolunteersTab() {
       </div>
 
       {/* Grid */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i} className="p-4 animate-pulse">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-11 h-11 rounded-full bg-neutral-200 dark:bg-neutral-700 flex-shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3.5 bg-neutral-200 dark:bg-neutral-700 rounded w-3/4" />
+                  <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2" />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[1,2,3].map((j) => <div key={j} className="h-14 bg-neutral-200 dark:bg-neutral-700 rounded-lg" />)}
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="py-16 text-center text-neutral-400 dark:text-neutral-500">
           <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
-          <p className="text-sm font-medium">No volunteers match your search.</p>
+          <p className="text-sm font-medium">
+            {volunteers.length === 0 ? 'No volunteers yet.' : 'No volunteers match your search.'}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -25,7 +25,11 @@ export default function StaffLogin() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950">
       <div className="w-full max-w-sm bg-gray-900 rounded-xl p-8 shadow-2xl">
-        <h1 className="text-white text-xl font-bold mb-1">VolunteerFlow Staff</h1>
+        <div className="flex items-center gap-2.5 mb-4">
+          <img src="/vf-logo.png" className="w-14 h-14" alt="" aria-hidden="true" />
+          <span className="text-white font-bold text-lg">VolunteerFlow</span>
+        </div>
+        <h1 className="text-white text-xl font-bold mb-1">Staff Portal</h1>
         <p className="text-gray-400 text-sm mb-6">Internal access only</p>
         {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
         <form onSubmit={handleSubmit} className="space-y-4">

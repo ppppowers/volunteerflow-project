@@ -13,7 +13,7 @@ interface ApiResponse {
   pages: number;
 }
 
-const PLAN_OPTIONS = ['all', 'free', 'starter', 'pro', 'enterprise'];
+const PLAN_OPTIONS = ['all', 'discover', 'grow'];
 const STATUS_OPTIONS = ['all', 'active', 'suspended', 'trial', 'cancelled'];
 
 export default function StaffOrgsPage() {

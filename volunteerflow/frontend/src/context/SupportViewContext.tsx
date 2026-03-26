@@ -3,12 +3,14 @@ import { staffApi } from '../lib/staffApi';
 
 interface SupportSession {
   sessionId: string; orgId: string; orgName: string;
-  mode: 'view_only' | 'support'; startedAt: string;
+  mode: 'support'; startedAt: string;
 }
 
 interface SupportViewCtx {
   session: SupportSession | null;
   isInSupportView: boolean;
+  isHydrated: boolean;
+  enterSupportView: (s: SupportSession, orgToken: string) => void;
   exitSupportView: () => Promise<void>;
 }
 
@@ -16,13 +18,16 @@ const SupportViewContext = createContext<SupportViewCtx | null>(null);
 
 export function SupportViewProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<SupportSession | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Hydrate session from sessionStorage after mount (avoids SSR mismatch)
   useEffect(() => {
-    const raw = sessionStorage.getItem('vf_support_session');
-    if (raw) {
-      try { setSession(JSON.parse(raw)); } catch {}
-    }
+    try {
+      const raw = sessionStorage.getItem('vf_support_session');
+      if (raw) setSession(JSON.parse(raw));
+    } catch {}
+    setIsHydrated(true);
   }, []);
 
   // Heartbeat every 60s
@@ -44,16 +49,33 @@ export function SupportViewProvider({ children }: { children: React.ReactNode })
     return () => window.removeEventListener('beforeunload', handler);
   }, [session]);
 
+  const enterSupportView = (s: SupportSession, orgToken: string) => {
+    // Back up any existing org token so we can restore it on exit
+    const existing = localStorage.getItem('vf_token');
+    if (existing) sessionStorage.setItem('vf_token_backup', existing);
+    localStorage.setItem('vf_token', orgToken);
+    sessionStorage.setItem('vf_support_session', JSON.stringify(s));
+    setSession(s);
+  };
+
   const exitSupportView = async () => {
     if (!session) return;
     await staffApi.post('/support/exit', { sessionId: session.sessionId }).catch(() => {});
+    // Restore original org token (or remove if there wasn't one)
+    const backup = sessionStorage.getItem('vf_token_backup');
+    if (backup) {
+      localStorage.setItem('vf_token', backup);
+      sessionStorage.removeItem('vf_token_backup');
+    } else {
+      localStorage.removeItem('vf_token');
+    }
     sessionStorage.removeItem('vf_support_session');
     setSession(null);
     window.location.href = `/staff/orgs/${session.orgId}`;
   };
 
   return (
-    <SupportViewContext.Provider value={{ session, isInSupportView: !!session, exitSupportView }}>
+    <SupportViewContext.Provider value={{ session, isInSupportView: !!session, isHydrated, enterSupportView, exitSupportView }}>
       {children}
     </SupportViewContext.Provider>
   );

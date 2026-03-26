@@ -2,8 +2,8 @@ import React from 'react';
 import { useSupportView } from '../../context/SupportViewContext';
 
 export function SupportBanner() {
-  const { session, isInSupportView, exitSupportView } = useSupportView();
-  if (!isInSupportView || !session) return null;
+  const { session, isInSupportView, isHydrated, exitSupportView } = useSupportView();
+  if (!isHydrated || !isInSupportView || !session) return null;
 
   const minutesAgo = Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000);
 
@@ -13,7 +13,7 @@ export function SupportBanner() {
         <span className="text-lg">🛟</span>
         <span>
           SUPPORT VIEW — <strong>{session.orgName}</strong>
-          {' '}· {session.mode === 'view_only' ? 'View Only' : 'Support Mode'}
+          {' '}· Support Mode
           {' '}· Started {minutesAgo}m ago
         </span>
       </div>

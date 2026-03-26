@@ -1,5 +1,5 @@
 // frontend/src/pages/applications.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/lib/api';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
@@ -38,6 +38,7 @@ import {
   Send,
   ExternalLink,
   Check,
+  Users,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -94,6 +95,13 @@ interface Submission {
 }
 
 type PageView = 'templates' | 'builder' | 'submissions' | 'submission_detail';
+
+interface GroupItem {
+  id: string;
+  name: string;
+  color: string;
+  applicationTemplateId?: string | null;
+}
 
 // ─── Question type metadata ──────────────────────────────────────────────────
 
@@ -348,29 +356,29 @@ function QuestionRow({
 
 // ─── API <-> Frontend adapter ─────────────────────────────────────────────────
 
-interface ApiApplication {
+interface ApiFormSubmission {
   id: string;
-  volunteerId: string;
-  eventId: string;
+  templateId: string | null;
+  templateName: string;
+  applicantType: string;
+  name: string;
+  email: string;
+  phone: string;
+  answers: Record<string, unknown>;
   status: string;
-  message?: string;
   createdAt: string;
-  volunteer?: { firstName: string; lastName: string; email: string };
-  event?: { title: string };
 }
 
-function mapApiApplication(a: ApiApplication): Submission {
+function mapApiApplication(a: ApiFormSubmission): Submission {
   return {
     id: a.id,
-    templateId: a.eventId,
-    templateName: a.event?.title ?? 'Event Application',
-    volunteerName: a.volunteer
-      ? `${a.volunteer.firstName} ${a.volunteer.lastName}`.trim()
-      : a.volunteerId,
-    volunteerEmail: a.volunteer?.email ?? '',
+    templateId: a.templateId ?? '',
+    templateName: a.templateName || 'General Application',
+    volunteerName: a.name,
+    volunteerEmail: a.email,
     submittedAt: a.createdAt.split('T')[0],
     status: (a.status?.toLowerCase() ?? 'pending') as SubmissionStatus,
-    answers: { message: a.message ?? '' },
+    answers: (a.answers ?? {}) as Record<string, string | string[] | boolean>,
   };
 }
 
@@ -379,7 +387,10 @@ function mapApiApplication(a: ApiApplication): Submission {
 export default function Applications() {
   // State
   const [view, setView] = useState<PageView>('templates');
-  const [templates, setTemplates] = useState<ApplicationTemplate[]>(MOCK_TEMPLATES);
+  const [templates, setTemplates] = useState<ApplicationTemplate[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [groups, setGroups] = useState<GroupItem[]>([]);
+  const [volunteerFormId, setVolunteerFormId] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
   const [usingMockData, setUsingMockData] = useState(false);
@@ -404,11 +415,36 @@ export default function Applications() {
   const [emailSent, setEmailSent] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
+  // Invite link modal — shown after approving a submission
+  const [inviteSubject, setInviteSubject] = useState<{ name: string; email: string } | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  // Fetch templates and groups from backend on mount
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingTemplates(true);
+    Promise.all([
+      api.get<ApplicationTemplate[]>('/application-templates'),
+      api.get<GroupItem[]>('/people/groups'),
+      api.get<{ volunteerFormId: string | null }>('/settings/volunteer-form'),
+    ])
+      .then(([tmplData, groupData, volFormData]) => {
+        if (!cancelled) {
+          setTemplates(tmplData);
+          setGroups(groupData);
+          setVolunteerFormId(volFormData.volunteerFormId);
+        }
+      })
+      .catch(() => { if (!cancelled) { setTemplates([]); setGroups([]); } })
+      .finally(() => { if (!cancelled) setLoadingTemplates(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   // Fetch applications from backend on mount; fall back to mock if unreachable
   useEffect(() => {
     let cancelled = false;
     setLoadingSubmissions(true);
-    api.get<ApiApplication[]>('/applications?limit=100')
+    api.get<ApiFormSubmission[]>('/form-submissions')
       .then((data) => {
         if (!cancelled) {
           setSubmissions(data.map(mapApiApplication));
@@ -445,38 +481,87 @@ export default function Applications() {
     setView('builder');
   };
 
-  const saveTemplate = () => {
+  const saveTemplate = async () => {
     if (!editingTemplate) return;
-    const updated = { ...editingTemplate, updatedAt: new Date().toISOString().split('T')[0] };
-    setTemplates((prev) => {
-      const idx = prev.findIndex((t) => t.id === updated.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = updated;
-        return copy;
+    const payload = {
+      name: editingTemplate.name,
+      description: editingTemplate.description,
+      questions: editingTemplate.questions,
+      status: editingTemplate.status,
+    };
+    try {
+      const isNew = !templates.find((t) => t.id === editingTemplate.id);
+      let saved: ApplicationTemplate;
+      if (isNew) {
+        saved = await api.post<ApplicationTemplate>('/application-templates', payload);
+        setTemplates((prev) => [...prev, saved]);
+      } else {
+        saved = await api.put<ApplicationTemplate>(`/application-templates/${editingTemplate.id}`, payload);
+        setTemplates((prev) => prev.map((t) => (t.id === saved.id ? saved : t)));
       }
-      return [...prev, updated];
-    });
+    } catch {
+      // keep local state if API fails
+      const updated = { ...editingTemplate, updatedAt: new Date().toISOString() };
+      setTemplates((prev) => {
+        const idx = prev.findIndex((t) => t.id === updated.id);
+        if (idx >= 0) { const copy = [...prev]; copy[idx] = updated; return copy; }
+        return [...prev, updated];
+      });
+    }
     setEditingTemplate(null);
     setView('templates');
   };
 
-  const duplicateTemplate = (t: ApplicationTemplate) => {
-    const dup: ApplicationTemplate = {
-      ...t,
-      id: generateId(),
+  const duplicateTemplate = async (t: ApplicationTemplate) => {
+    const payload = {
       name: `${t.name} (Copy)`,
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString().split('T')[0],
-      submissionCount: 0,
-      status: 'draft',
+      description: t.description,
       questions: t.questions.map((q) => ({ ...q, id: generateId(), options: q.options?.map((o) => ({ ...o, id: generateId() })) })),
+      status: 'draft' as const,
     };
-    setTemplates((prev) => [...prev, dup]);
+    try {
+      const dup = await api.post<ApplicationTemplate>('/application-templates', payload);
+      setTemplates((prev) => [...prev, dup]);
+    } catch {
+      setTemplates((prev) => [...prev, { ...payload, id: generateId(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), submissionCount: 0 }]);
+    }
   };
 
-  const deleteTemplate = (id: string) => {
+  const deleteTemplate = async (id: string) => {
     setTemplates((prev) => prev.filter((t) => t.id !== id));
+    api.delete(`/application-templates/${id}`).catch(() => {});
+  };
+
+  // Effective groups — includes a synthetic "Volunteers" entry so templates can be linked to the volunteer signup form
+  const VOLUNTEERS_ID = '__volunteers__';
+  const effectiveGroups = useMemo<GroupItem[]>(() => [
+    { id: VOLUNTEERS_ID, name: 'Volunteers', color: '#6366f1', applicationTemplateId: volunteerFormId },
+    ...groups,
+  ], [groups, volunteerFormId]);
+
+  const linkGroup = (groupId: string, templateId: string) => {
+    if (groupId === VOLUNTEERS_ID) {
+      setVolunteerFormId(templateId);
+      api.put('/settings/volunteer-form', { volunteerFormId: templateId }).catch(() => setVolunteerFormId(null));
+      return;
+    }
+    const g = groups.find((g) => g.id === groupId);
+    if (!g) return;
+    setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, applicationTemplateId: templateId } : g));
+    api.put(`/people/groups/${groupId}`, { name: g.name, color: g.color, applicationTemplateId: templateId })
+      .catch(() => setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, applicationTemplateId: null } : g)));
+  };
+
+  const unlinkGroup = (groupId: string) => {
+    if (groupId === VOLUNTEERS_ID) {
+      setVolunteerFormId(null);
+      api.put('/settings/volunteer-form', { volunteerFormId: null }).catch(() => {});
+      return;
+    }
+    const g = groups.find((g) => g.id === groupId);
+    if (!g) return;
+    setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, applicationTemplateId: null } : g));
+    api.put(`/people/groups/${groupId}`, { name: g.name, color: g.color, applicationTemplateId: null }).catch(() => {});
   };
 
   const addQuestion = (type: QuestionType) => {
@@ -525,6 +610,7 @@ export default function Applications() {
   // ── Submission actions ───────────────────────────────────────────────────
 
   const handleStatusChange = async (subId: string, newStatus: SubmissionStatus) => {
+    const sub = submissions.find((s) => s.id === subId);
     // Optimistic update
     setSubmissions((prev) => prev.map((s) => (s.id === subId ? { ...s, status: newStatus } : s)));
     if (activeSubmission?.id === subId) {
@@ -532,11 +618,17 @@ export default function Applications() {
     }
     if (!usingMockData) {
       try {
-        await api.put(`/applications/${subId}`, { status: newStatus.toUpperCase() });
+        await api.put(`/form-submissions/${subId}`, { status: newStatus.toUpperCase() });
       } catch {
         // Revert on failure
         setSubmissions((prev) => prev.map((s) => (s.id === subId ? { ...s, status: activeSubmission?.status ?? s.status } : s)));
+        return;
       }
+    }
+    // After approval, surface the account-creation invite link
+    if (newStatus === 'approved' && sub) {
+      setInviteSubject({ name: sub.volunteerName, email: sub.volunteerEmail });
+      setInviteCopied(false);
     }
   };
 
@@ -649,7 +741,17 @@ export default function Applications() {
 
       {renderTabs()}
 
-      {templates.length === 0 ? (
+      {loadingTemplates ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1,2,3].map((i) => (
+            <Card key={i} className="p-5 space-y-3 animate-pulse">
+              <div className="h-4 bg-neutral-200 dark:bg-neutral-700 rounded w-3/4" />
+              <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-full" />
+              <div className="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2" />
+            </Card>
+          ))}
+        </div>
+      ) : templates.length === 0 ? (
         <Card className="p-12 text-center">
           <FileQuestion className="w-12 h-12 text-neutral-300 dark:text-neutral-600 mx-auto mb-3" />
           <p className="text-neutral-600 dark:text-neutral-400 mb-4">No application forms yet</p>
@@ -681,6 +783,50 @@ export default function Applications() {
                     <span>·</span>
                     <span>Updated {formatDate(tmpl.updatedAt)}</span>
                   </div>
+
+                  {/* Linked groups */}
+                  {(() => {
+                    const linked = effectiveGroups.filter((g) => g.applicationTemplateId === tmpl.id);
+                    const unlinked = effectiveGroups.filter((g) => !g.applicationTemplateId);
+                    return (
+                      <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-700">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Users className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
+                          {linked.length === 0 && (
+                            <span className="text-xs text-neutral-400 dark:text-neutral-500">No groups linked</span>
+                          )}
+                          {linked.map((g) => (
+                            <span
+                              key={g.id}
+                              className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-xs font-medium text-white"
+                              style={{ background: g.color }}
+                            >
+                              {g.name}
+                              <button
+                                onClick={() => unlinkGroup(g.id)}
+                                className="ml-0.5 rounded-full hover:bg-black/20 p-0.5 transition-colors"
+                                title="Unlink group"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </span>
+                          ))}
+                          {unlinked.length > 0 && (
+                            <select
+                              value=""
+                              onChange={(e) => { if (e.target.value) linkGroup(e.target.value, tmpl.id); }}
+                              className="text-xs border border-dashed border-neutral-300 dark:border-neutral-600 rounded-full px-2 py-0.5 bg-transparent text-neutral-500 dark:text-neutral-400 cursor-pointer hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-400 outline-none transition-colors"
+                            >
+                              <option value="">+ Link group</option>
+                              {unlinked.map((g) => (
+                                <option key={g.id} value={g.id}>{g.name}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-neutral-100 dark:border-neutral-700 space-y-2">
@@ -1344,6 +1490,74 @@ export default function Applications() {
           </div>
         </div>
       )}
+      {/* ── Invite Link Modal — shown after approving a submission ─────────── */}
+      {inviteSubject && (() => {
+        const qs = new URLSearchParams({ name: inviteSubject.name, email: inviteSubject.email });
+        const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/create-account?${qs.toString()}`;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setInviteSubject(null)} />
+            <div className="relative w-full max-w-sm bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="p-6 text-center border-b border-neutral-100 dark:border-neutral-700">
+                <div className="w-12 h-12 rounded-full bg-success-100 dark:bg-success-900/30 flex items-center justify-center mx-auto mb-3">
+                  <Check className="w-6 h-6 text-success-600 dark:text-success-400" />
+                </div>
+                <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+                  {inviteSubject.name} Approved!
+                </h2>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+                  Share this link so they can create their account and complete their profile.
+                </p>
+              </div>
+
+              <div className="p-5 space-y-3">
+                <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-700/50 rounded-xl border border-neutral-200 dark:border-neutral-600">
+                  <Link2 className="w-4 h-4 text-neutral-400 shrink-0" />
+                  <span className="flex-1 text-xs text-neutral-600 dark:text-neutral-300 truncate font-mono">{link}</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(link).then(() => {
+                        setInviteCopied(true);
+                        setTimeout(() => setInviteCopied(false), 2000);
+                      });
+                    }}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors shrink-0 ${
+                      inviteCopied
+                        ? 'text-success-600 bg-success-50 dark:bg-success-900/20'
+                        : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-600'
+                    }`}
+                  >
+                    {inviteCopied ? <><Check className="w-3.5 h-3.5" /> Copied!</> : <><Copy className="w-3.5 h-3.5" /> Copy</>}
+                  </button>
+                </div>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500 text-center">
+                  They'll set a password and fill out their profile when they open this link.
+                </p>
+              </div>
+
+              <div className="flex gap-3 p-5 pt-0">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(link).then(() => {
+                      setInviteCopied(true);
+                      setTimeout(() => setInviteCopied(false), 2000);
+                    });
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-neutral-300 dark:border-neutral-600 text-sm font-semibold text-neutral-700 dark:text-neutral-300 rounded-xl hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+                >
+                  <Copy className="w-4 h-4" /> Copy Link
+                </button>
+                <button
+                  onClick={() => setInviteSubject(null)}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-sm font-semibold text-white rounded-xl transition-colors"
+                >
+                  Done <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Layout>
   );
 }

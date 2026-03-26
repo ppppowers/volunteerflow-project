@@ -20,8 +20,7 @@ module.exports = function staffOrgsRouter(pool) {
 
       if (q) {
         params.push(`%${q}%`);
-        // Issue 5: search org_name, email, contact_name — not u.id
-        conditions.push(`(u.org_name ILIKE $${params.length} OR u.email ILIKE $${params.length} OR u.contact_name ILIKE $${params.length})`);
+        conditions.push(`(u.org_name ILIKE $${params.length} OR u.email ILIKE $${params.length} OR u.contact_name ILIKE $${params.length} OR u.id ILIKE $${params.length})`);
       }
       if (plan) {
         params.push(plan);
@@ -31,23 +30,13 @@ module.exports = function staffOrgsRouter(pool) {
         params.push(status);
         conditions.push(`u.status = $${params.length}`);
       }
-      // Issue 1: rep filter
-      if (rep) {
-        params.push(rep);
-        conditions.push(`u.assigned_rep = $${params.length}`);
-      }
 
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
       const orgsResult = await pool.query(`
-        SELECT u.id, u.org_name, u.email, u.plan, u.status, u.created_at, u.last_login,
-               COUNT(DISTINCT v.id) as volunteer_count,
-               COUNT(DISTINCT e.id) as event_count
+        SELECT u.id, u.org_name, u.email, u.contact_name, u.plan, u.status, u.created_at, u.last_login
         FROM users u
-        LEFT JOIN volunteers v ON v.org_id = u.id
-        LEFT JOIN events e ON e.org_id = u.id
         ${where}
-        GROUP BY u.id
         ORDER BY u.created_at DESC
         LIMIT $${params.length + 1} OFFSET $${params.length + 2}
       `, [...params, limit, offset]);
@@ -108,16 +97,13 @@ module.exports = function staffOrgsRouter(pool) {
       if (!orgResult.rows[0]) return res.status(404).json({ error: 'Org not found' });
       const before = orgResult.rows[0];
 
-      // Issue 6: field-level permission checks
+      // Field-level permission checks — only columns that exist on the users table
       const fieldPermissions = {
-        plan:           'orgs.edit_plan',
-        contact_email:  'orgs.edit_contact',
-        billing_info:   'orgs.edit_billing',
-        payment_method: 'orgs.edit_billing',
-        tax_id:         'orgs.edit_billing',
-        status:         'orgs.edit_status',
-        org_name:       'orgs.edit_basic',
-        name:           'orgs.edit_basic',
+        plan:          'orgs.edit_plan',
+        status:        'orgs.edit_status',
+        org_name:      'orgs.edit_basic',
+        contact_name:  'orgs.edit_contact',
+        contact_email: 'orgs.edit_contact',
       };
 
       // Check each submitted field's required permission
@@ -135,8 +121,7 @@ module.exports = function staffOrgsRouter(pool) {
       }
       if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 
-      // Fix 2: harden column name allowlist
-      const ALLOWED_COLUMNS = new Set(['plan', 'contact_email', 'billing_info', 'payment_method', 'tax_id', 'status', 'org_name', 'name']);
+      const ALLOWED_COLUMNS = new Set(allowed);
       for (const key of Object.keys(updates)) {
         if (!ALLOWED_COLUMNS.has(key)) {
           return res.status(400).json({ error: `Invalid field: ${key}` });
@@ -161,7 +146,7 @@ module.exports = function staffOrgsRouter(pool) {
 
       // Issue 7: return updated org row
       const updatedResult = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
-      res.json(updatedResult.rows[0]);
+      res.json({ org: updatedResult.rows[0] });
     } catch (err) {
       console.error('[staff/orgs] error:', err.message);
       return res.status(500).json({ error: 'Internal server error' });
@@ -433,11 +418,8 @@ module.exports = function staffOrgsRouter(pool) {
     try {
       const { id } = req.params;
       const result = await pool.query(`
-        SELECT 'staff' as source, id, timestamp, staff_user_name as actor, action, category, outcome, metadata
+        SELECT id, timestamp, staff_user_name as actor, action, category, outcome, metadata
         FROM staff_audit_logs WHERE target_org_id = $1
-        UNION ALL
-        SELECT 'org' as source, id, created_at as timestamp, user_id as actor, action, category, 'success' as outcome, details as metadata
-        FROM audit_logs WHERE org_id = $1
         ORDER BY timestamp DESC LIMIT 50
       `, [id]);
       res.json({ activity: result.rows });

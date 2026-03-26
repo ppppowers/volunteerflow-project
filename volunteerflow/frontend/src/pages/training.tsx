@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import toastLib from 'react-hot-toast';
 import Layout from '@/components/Layout';
@@ -101,26 +101,95 @@ function isDirectVideo(url: string) {
   return /\.(mp4|webm|ogg)(\?|$)/i.test(url);
 }
 
-function VideoEmbed({ url, caption }: { url: string; caption?: string }) {
+function VideoEmbed({ url, caption, onCompleted }: { url: string; caption?: string; onCompleted?: () => void }) {
   const embed = getEmbedUrl(url);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Use a ref so the message handler always has the latest callback without
+  // needing to re-register the listener when onCompleted identity changes.
+  const onCompletedRef = useRef(onCompleted);
+  useEffect(() => { onCompletedRef.current = onCompleted; }, [onCompleted]);
+
+  const isYT = !!embed && embed.includes('youtube.com/embed');
+  const isVimeo = !!embed && embed.includes('player.vimeo.com');
+
+  // Global postMessage listener for YouTube / Vimeo end events
+  useEffect(() => {
+    if (!embed || isDirectVideo(embed) || (!isYT && !isVimeo)) return;
+
+    function handleMessage(evt: MessageEvent) {
+      try {
+        const d = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data;
+        if (!d) return;
+        // YouTube: playerState 0 = ended
+        if (isYT && evt.origin.includes('youtube.com') && d.event === 'onStateChange' && d.info === 0) {
+          onCompletedRef.current?.();
+        }
+        // Vimeo: 'finish' event
+        if (isVimeo && evt.origin === 'https://player.vimeo.com' && d.event === 'finish') {
+          onCompletedRef.current?.();
+        }
+      } catch { /* ignore non-JSON messages */ }
+    }
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [embed, isYT, isVimeo]);
+
+  // Called once the iframe DOM has loaded — send API init messages
+  function handleIframeLoad() {
+    const win = iframeRef.current?.contentWindow;
+    if (!win) return;
+    try {
+      if (isYT) {
+        // Register as a listener so YouTube sends state-change events back
+        win.postMessage(JSON.stringify({ event: 'listening', id: 'ytplayer' }), '*');
+      }
+      if (isVimeo) {
+        // Subscribe to the finish event
+        win.postMessage(JSON.stringify({ method: 'addEventListener', value: 'finish' }), '*');
+      }
+    } catch { /* cross-origin sandbox may block */ }
+  }
+
   if (!embed) return (
     <div className="bg-neutral-100 dark:bg-neutral-700 rounded-xl p-6 text-center text-sm text-neutral-400">
       <AlertCircle className="w-6 h-6 mx-auto mb-2 opacity-50" />
       Invalid or unsupported video URL
     </div>
   );
+
+  // Append JS API params so the embeds can send events to us
+  let finalSrc = embed;
+  if (isYT) {
+    const u = new URL(embed);
+    u.searchParams.set('enablejsapi', '1');
+    finalSrc = u.toString();
+  }
+  if (isVimeo) {
+    const u = new URL(embed);
+    u.searchParams.set('api', '1');
+    finalSrc = u.toString();
+  }
+
   return (
     <div className="space-y-2">
       <div className="relative w-full rounded-xl overflow-hidden bg-black" style={{ paddingBottom: '56.25%' }}>
         {isDirectVideo(embed) ? (
-          <video src={embed} controls className="absolute inset-0 w-full h-full" />
+          <video
+            src={embed}
+            controls
+            className="absolute inset-0 w-full h-full"
+            onEnded={() => onCompletedRef.current?.()}
+          />
         ) : (
           <iframe
-            src={embed}
+            ref={iframeRef}
+            src={finalSrc}
             className="absolute inset-0 w-full h-full border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
             title={caption || 'Video'}
+            onLoad={handleIframeLoad}
           />
         )}
       </div>
@@ -490,15 +559,38 @@ function CourseBuilderModal({
 
 // ─── Course Viewer Modal ──────────────────────────────────────────────────────
 
-function CourseViewerModal({ course, onClose }: { course: TrainingCourse; onClose: () => void }) {
+// Section progress is persisted in localStorage keyed by course id.
+// Shape: Record<sectionId, isoTimestamp>
+function loadProgress(courseId: string): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(`vf_sp_${courseId}`) ?? '{}');
+  } catch { return {}; }
+}
+function saveProgress(courseId: string, progress: Record<string, string>) {
+  localStorage.setItem(`vf_sp_${courseId}`, JSON.stringify(progress));
+}
+
+function CourseViewerModal({ course, onClose, isPreview = false }: { course: TrainingCourse; onClose: () => void; isPreview?: boolean }) {
   const [activeSection, setActiveSection] = useState(0);
-  const [completedSections, setCompletedSections] = useState<Set<string>>(new Set());
+  // sectionProgress maps sectionId → ISO timestamp when completed.
+  // In preview mode we use ephemeral state only (no localStorage read/write).
+  const [sectionProgress, setSectionProgress] = useState<Record<string, string>>(
+    () => isPreview ? {} : loadProgress(course.id)
+  );
   const [fileUploads, setFileUploads] = useState<Record<string, string>>({});
   const section = course.sections[activeSection];
 
   function markDone(id: string) {
-    setCompletedSections(prev => { const next = new Set(prev); next.add(id); return next; });
+    setSectionProgress(prev => {
+      if (prev[id]) return prev; // already done
+      const next = { ...prev, [id]: new Date().toISOString() };
+      if (!isPreview) saveProgress(course.id, next);
+      return next;
+    });
   }
+
+  const completedCount = Object.keys(sectionProgress).length;
+  const totalCount = course.sections.length;
 
   return (
     <div className="fixed inset-0 bg-black/60 dark:bg-black/80 flex items-center justify-center p-4 z-[9999]" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -514,16 +606,26 @@ function CourseViewerModal({ course, onClose }: { course: TrainingCourse; onClos
               <p className="text-xs text-neutral-500">{course.sections.length} sections · ~{course.estimatedMinutes} min</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors">
-            <X className="w-5 h-5 text-neutral-500" />
-          </button>
+          <div className="flex items-center gap-3">
+            {totalCount > 0 && (
+              <div className="flex items-center gap-2 text-xs text-neutral-500">
+                <div className="w-24 h-1.5 bg-neutral-200 dark:bg-neutral-600 rounded-full overflow-hidden">
+                  <div className="h-full bg-success-500 rounded-full transition-all" style={{ width: `${(completedCount / totalCount) * 100}%` }} />
+                </div>
+                <span>{completedCount}/{totalCount}</span>
+              </div>
+            )}
+            <button onClick={onClose} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors">
+              <X className="w-5 h-5 text-neutral-500" />
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
           {/* Sidebar nav */}
           <div className="w-56 flex-shrink-0 border-r border-neutral-200 dark:border-neutral-700 overflow-y-auto p-3 space-y-1">
             {course.sections.map((s, i) => {
-              const done = completedSections.has(s.id);
+              const doneAt = sectionProgress[s.id];
               return (
                 <button
                   key={s.id}
@@ -532,10 +634,17 @@ function CourseViewerModal({ course, onClose }: { course: TrainingCourse; onClos
                     i === activeSection ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-700' : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-700'
                   }`}
                 >
-                  <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center ${done ? 'bg-success-500' : 'bg-neutral-200 dark:bg-neutral-600'}`}>
-                    {done ? <Check className="w-2.5 h-2.5 text-white" /> : <span className="text-[9px] font-bold text-neutral-500 dark:text-neutral-300">{i + 1}</span>}
+                  <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center ${doneAt ? 'bg-success-500' : 'bg-neutral-200 dark:bg-neutral-600'}`}>
+                    {doneAt ? <Check className="w-2.5 h-2.5 text-white" /> : <span className="text-[9px] font-bold text-neutral-500 dark:text-neutral-300">{i + 1}</span>}
                   </span>
-                  <span className="leading-snug font-medium">{s.title}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="leading-snug font-medium block truncate">{s.title}</span>
+                    {doneAt && (
+                      <span className="text-[10px] text-success-600 dark:text-success-400 leading-tight">
+                        {new Date(doneAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
                 </button>
               );
             })}
@@ -548,6 +657,11 @@ function CourseViewerModal({ course, onClose }: { course: TrainingCourse; onClos
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">{section.title}</h3>
                   <div className="flex items-center gap-2">
+                    {sectionProgress[section.id] && (
+                      <span className="flex items-center gap-1 text-xs font-semibold text-success-600 dark:text-success-400">
+                        <Check className="w-3 h-3" /> Completed
+                      </span>
+                    )}
                     {section.required && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400">Required</span>}
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                       section.type === 'video' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
@@ -560,7 +674,16 @@ function CourseViewerModal({ course, onClose }: { course: TrainingCourse; onClos
                 </div>
 
                 {section.type === 'video' && section.videoUrl && (
-                  <VideoEmbed url={section.videoUrl} caption={section.videoCaption} />
+                  <>
+                    <VideoEmbed
+                      url={section.videoUrl}
+                      caption={section.videoCaption}
+                      onCompleted={() => markDone(section.id)}
+                    />
+                    {!sectionProgress[section.id] && (
+                      <p className="text-xs text-neutral-400 text-center">Watch the video to the end to mark this section complete.</p>
+                    )}
+                  </>
                 )}
 
                 {section.type === 'text' && section.content && (
@@ -612,13 +735,21 @@ function CourseViewerModal({ course, onClose }: { course: TrainingCourse; onClos
                     <ArrowLeft className="w-4 h-4" /> Previous
                   </button>
                   <div className="flex items-center gap-2">
-                    {!completedSections.has(section.id) && section.type !== 'file' && (
+                    {/* Manual completion — text always, video as fallback if auto-detect fails */}
+                    {!sectionProgress[section.id] && (section.type === 'text' || section.type === 'video') && (
                       <Button size="sm" variant="outline" onClick={() => markDone(section.id)}>
-                        <Check className="w-3.5 h-3.5 mr-1.5" /> Mark complete
+                        <Check className="w-3.5 h-3.5 mr-1.5" />
+                        {section.type === 'video' ? 'Mark as watched' : 'Mark complete'}
                       </Button>
                     )}
                     {activeSection < course.sections.length - 1 && (
-                      <Button size="sm" onClick={() => { markDone(section.id); setActiveSection(activeSection + 1); }}>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (section.type !== 'file') markDone(section.id);
+                          setActiveSection(activeSection + 1);
+                        }}
+                      >
                         Next section
                       </Button>
                     )}
@@ -1607,7 +1738,7 @@ export default function TrainingPage() {
         <CourseBuilderModal initial={editingCourse} onSave={saveCourse} onClose={() => { setBuilderOpen(false); setEditingCourse(null); }} />
       )}
       {viewingCourse && (
-        <CourseViewerModal course={viewingCourse} onClose={() => setViewingCourse(null)} />
+        <CourseViewerModal course={viewingCourse} onClose={() => setViewingCourse(null)} isPreview />
       )}
       {recordOpen && (
         <RecordCompletionModal courses={courses.filter(c => c.published)} volunteers={volunteers} onSave={saveCompletion} onClose={() => setRecordOpen(false)} />

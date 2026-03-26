@@ -1,9 +1,7 @@
 // Badge color maps
 export const PLAN_BADGE: Record<string, string> = {
-  free: 'bg-gray-700 text-gray-300',
-  starter: 'bg-blue-900 text-blue-300',
-  pro: 'bg-purple-900 text-purple-300',
-  enterprise: 'bg-amber-900 text-amber-300',
+  discover: 'bg-blue-900 text-blue-300',
+  grow:     'bg-purple-900 text-purple-300',
 };
 
 export const STATUS_BADGE: Record<string, string> = {

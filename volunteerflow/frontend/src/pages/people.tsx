@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
-import { Users, Briefcase, Plus, X, Check, Link2, Copy, ArrowRight, FileText, UserPlus, Mail, Phone } from 'lucide-react';
+import { Users, Briefcase, Plus, X, Check, Link2, Copy, ArrowRight, FileText, UserPlus, Mail, Phone, Zap } from 'lucide-react';
 import { api } from '@/lib/api';
 import { VolunteersTab } from '@/components/people/VolunteersTab';
 import { StaffTab } from '@/components/people/StaffTab';
 import { GroupTab, GROUP_COLORS, type PeopleGroup } from '@/components/people/GroupTab';
 import { PlanGate } from '@/components/PlanGate';
+import { usePlan } from '@/context/usePlan';
 import toast from 'react-hot-toast';
 
 interface TemplateOption { id: string; name: string; }
@@ -460,6 +461,7 @@ function AddPersonModal({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PeoplePage() {
+  const { can } = usePlan();
   const [activeTab, setActiveTab] = useState<string>('volunteers');
   const [groups, setGroups] = useState<PeopleGroup[]>([]);
   const [showNewGroup, setShowNewGroup] = useState(false);
@@ -565,36 +567,13 @@ export default function PeoplePage() {
             Staff
           </button>
 
-          {/* Dynamic group tabs + New Group button — gated to group_registration plan */}
-          <PlanGate feature="group_registration">
-            <>
-              {groups.map((group) => (
-                <button
-                  key={group.id}
-                  role="tab"
-                  aria-selected={activeTab === group.id}
-                  onClick={() => setActiveTab(group.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    activeTab === group.id
-                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
-                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'
-                  }`}
-                >
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: group.color }} />
-                  {group.name}
-                </button>
-              ))}
-
-              {/* Add Group button */}
-              <button
-                onClick={() => setShowNewGroup(true)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-white dark:hover:bg-neutral-700 transition-all border border-dashed border-neutral-300 dark:border-neutral-600"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                New Group
-              </button>
-            </>
-          </PlanGate>
+          <button
+            onClick={() => setShowNewGroup(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-white dark:hover:bg-neutral-700 transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New Group
+          </button>
         </div>
 
         {/* Tab content */}
@@ -607,23 +586,52 @@ export default function PeoplePage() {
         ) : activeTab === 'staff' ? (
           <StaffTab />
         ) : activeGroup ? (
-          <PlanGate feature="group_registration">
-            <GroupTab
-              key={activeGroup.id}
-              group={activeGroup}
-              onDelete={() => handleDeleteGroup(activeGroup.id)}
-              onUpdate={handleUpdateGroup}
-              templates={formTemplates}
-            />
-          </PlanGate>
+          <GroupTab
+            key={activeGroup.id}
+            group={activeGroup}
+            onDelete={() => handleDeleteGroup(activeGroup.id)}
+            onUpdate={handleUpdateGroup}
+            templates={formTemplates}
+          />
         ) : null}
 
         {/* New Group Modal */}
         {showNewGroup && (
-          <NewGroupModal
-            onClose={handleNewGroupClose}
-            onCreate={handleCreateGroup}
-          />
+          <PlanGate
+            feature="group_registration"
+            fallback={
+              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+                <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl w-full max-w-xs p-6 text-center">
+                  <div className="w-10 h-10 rounded-full bg-warning-100 dark:bg-warning-900/40 flex items-center justify-center mx-auto mb-3">
+                    <Zap className="w-5 h-5 text-warning-600 dark:text-warning-400" />
+                  </div>
+                  <p className="text-sm font-bold text-neutral-900 dark:text-neutral-100 mb-1">Upgrade to Grow</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-4">
+                    People groups are available on the Grow plan and above.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowNewGroup(false)}
+                      className="flex-1 px-4 py-2 border border-neutral-300 dark:border-neutral-600 text-sm font-semibold text-neutral-700 dark:text-neutral-300 rounded-xl hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => { window.location.href = '/pricing'; }}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-colors"
+                    >
+                      View plans <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            }
+          >
+            <NewGroupModal
+              onClose={handleNewGroupClose}
+              onCreate={handleCreateGroup}
+            />
+          </PlanGate>
         )}
 
         {/* Add Person Modal */}

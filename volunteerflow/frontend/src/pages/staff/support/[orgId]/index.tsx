@@ -22,19 +22,18 @@ export function SupportViewLayout({
   orgId: string;
   activeHref: string;
 }) {
-  const { session, exitSupportView } = useSupportView();
+  const { session, isHydrated, exitSupportView } = useSupportView();
   const router = useRouter();
 
-  // Guard: must have an active session matching this org
+  // Guard: wait for hydration before redirecting to avoid false redirect on first render
   useEffect(() => {
-    if (!session) {
-      router.replace('/staff/orgs');
-    } else if (session.orgId !== orgId) {
+    if (!isHydrated) return;
+    if (!session || session.orgId !== orgId) {
       router.replace('/staff/orgs');
     }
-  }, [session, orgId, router]);
+  }, [isHydrated, session, orgId, router]);
 
-  if (!session || session.orgId !== orgId) return null;
+  if (!isHydrated || !session || session.orgId !== orgId) return null;
 
   const navItems: NavItem[] = [
     { label: 'Dashboard', href: `/staff/support/${orgId}` },
@@ -54,7 +53,7 @@ export function SupportViewLayout({
           <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Support View</p>
           <p className="text-sm font-medium text-gray-200 mt-0.5 truncate">{session.orgName}</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {session.mode === 'view_only' ? 'View Only' : 'Full Support'}
+            {'Full Support'}
           </p>
         </div>
 

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useState } from 'react';
+import PublicNav from '@/components/PublicNav';
+import PublicFooter from '@/components/PublicFooter';
 import {
   Users, Calendar, Bell, BarChart2, CheckCircle, ArrowRight,
-  Star, Menu, X, Zap, Clock, Heart, Shield, ChevronRight,
+  Star, Zap, Clock, Heart, Shield,
   FileText, MessageSquare, TrendingUp, Settings,
 } from 'lucide-react';
 
@@ -37,7 +38,7 @@ const styles = `
   .lp-nav {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
     padding: 0 24px;
-    height: 64px;
+    height: 80px;
     display: flex; align-items: center; justify-content: space-between;
     transition: background 0.3s, box-shadow 0.3s;
   }
@@ -480,81 +481,34 @@ const STEPS = [
   { num: '3', title: 'Manage and track everything', desc: 'Review applications, send communications, track hours, and monitor performance from your central dashboard. Your team stays informed automatically.' },
 ];
 
-const TESTIMONIALS = [
-  {
-    quote: "Before VolunteerFlow, coordinating 200 volunteers for our annual food drive was an absolute nightmare — spreadsheets everywhere, emails getting lost, people showing up for the wrong shift. Now it runs itself. I actually enjoy the event.",
-    author: 'Keisha M.',
-    role: 'Volunteer Coordinator, City Harvest Alliance',
-    avatar: 'KM', color: '#10b981',
-  },
-  {
-    quote: "We went from 40 to 180 active volunteers in one year. VolunteerFlow made that growth manageable. The onboarding flow, the automated reminders, the reporting — it's everything we needed and more.",
-    author: 'Pastor Daniel R.',
-    role: 'Community Engagement Director, Grace Community Church',
-    avatar: 'DR', color: '#3b82f6',
-  },
-  {
-    quote: "As a school district running after-school programs across 12 campuses, we needed something that could handle scale and complexity. VolunteerFlow delivered. Our team saves about 20 hours a week.",
-    author: 'Sandra T.',
-    role: 'Program Director, Lincoln Unified School District',
-    avatar: 'ST', color: '#8b5cf6',
-  },
+// ─── TESTIMONIALS ─────────────────────────────────────────────────────────────
+// To add a review, copy one of the template objects below into the array.
+//
+// Template:
+// {
+//   quote:  "Paste the customer's exact quote here.",
+//   author: 'First Last',
+//   role:   'Job Title, Organization Name',
+//   avatar: 'FL',           // two initials shown in the avatar circle
+//   color:  '#10b981',      // avatar background — pick any hex color
+// }
+//
+// Color suggestions: '#10b981' green · '#3b82f6' blue · '#8b5cf6' purple
+//                    '#f59e0b' amber · '#ec4899' pink · '#ef4444' red
+// ─────────────────────────────────────────────────────────────────────────────
+const TESTIMONIALS: { quote: string; author: string; role: string; avatar: string; color: string }[] = [
+  // Add reviews here
 ];
 
 export default function LandingPage() {
-  const [scrolled, setScrolled] = useState(false);
-  const [mobileMenu, setMobileMenu] = useState(false);
   const [activeTab, setActiveTab] = useState('nonprofits');
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener('scroll', onScroll);
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
 
   const activeCase = USE_CASES.find((u) => u.id === activeTab)!;
 
   return (
     <div className="lp">
       <style dangerouslySetInnerHTML={{ __html: styles }} />
-
-      {/* Nav */}
-      <nav className={`lp-nav ${scrolled ? 'scrolled' : ''}`}>
-        <a href="/landing" className="nav-logo">
-          <div className="nav-logo-mark">
-            <Heart className="w-5 h-5 text-white" />
-          </div>
-          <span className="nav-logo-text">VolunteerFlow</span>
-        </a>
-        <div className="nav-links">
-          <a href="#features" className="nav-link">Features</a>
-          <a href="#how-it-works" className="nav-link">How it works</a>
-          <a href="/pricing" className="nav-link">Pricing</a>
-        </div>
-        <div className="nav-cta">
-          <a href="/auth" className="btn-nav-secondary">Sign in</a>
-          <a href="/signup" className="btn-nav-primary">
-            Start free <ArrowRight className="w-3.5 h-3.5" />
-          </a>
-        </div>
-        <button className="nav-hamburger" onClick={() => setMobileMenu(!mobileMenu)} aria-label="Toggle menu">
-          {mobileMenu ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
-      </nav>
-
-      {mobileMenu && (
-        <div className="mobile-menu">
-          <a href="#features" className="mobile-menu-link" onClick={() => setMobileMenu(false)}>Features</a>
-          <a href="#how-it-works" className="mobile-menu-link" onClick={() => setMobileMenu(false)}>How it works</a>
-          <a href="/pricing" className="mobile-menu-link" onClick={() => setMobileMenu(false)}>Pricing</a>
-          <div className="mobile-menu-cta">
-            <a href="/auth" className="btn-nav-secondary">Sign in</a>
-            <a href="/signup" className="btn-nav-primary">
-              Start free <ArrowRight className="w-3.5 h-3.5" />
-            </a>
-          </div>
-        </div>
-      )}
+      <PublicNav />
 
       {/* Hero */}
       <section className="hero-bg" style={{ paddingTop: 140, paddingBottom: 100 }}>
@@ -648,7 +602,7 @@ export default function LandingPage() {
             </div>
             <h2 className="section-h2">Built for the way <em>real organizations</em> work</h2>
             <p className="section-sub" style={{ margin: '0 auto' }}>
-              We talked to hundreds of volunteer coordinators to understand exactly where the pain is. Then we built the solution.
+              We talked to volunteer coordinators to understand exactly where the pain is. Then we built the solution.
             </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 24 }}>
@@ -800,26 +754,14 @@ export default function LandingPage() {
             </div>
             <h2 className="section-h2">Organizations that <em>transformed</em> their programs</h2>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24 }}>
-            {TESTIMONIALS.map((t) => (
-              <div key={t.author} className="testimonial-card">
-                <div style={{ display: 'flex', gap: 2, marginBottom: 16 }}>
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-4 h-4" style={{ color: '#f59e0b', fill: '#f59e0b' }} />
-                  ))}
-                </div>
-                <p className="testimonial-quote">"{t.quote}"</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: t.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
-                    {t.avatar}
-                  </div>
-                  <div>
-                    <div className="testimonial-author">{t.author}</div>
-                    <div className="testimonial-role">{t.role}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div style={{ border: '2px dashed #e2e8f0', borderRadius: 20, padding: '56px 32px', textAlign: 'center' }}>
+            <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginBottom: 16 }}>
+              {[...Array(5)].map((_, i) => (
+                <Star key={i} className="w-5 h-5" style={{ color: '#cbd5e1', fill: '#cbd5e1' }} />
+              ))}
+            </div>
+            <p style={{ fontSize: 15, fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>Customer reviews coming soon</p>
+            <p style={{ fontSize: 14, color: '#cbd5e1' }}>We're collecting stories from our early customers.</p>
           </div>
         </div>
       </section>
@@ -832,7 +774,7 @@ export default function LandingPage() {
             <em style={{ color: '#10b981' }}>volunteer program?</em>
           </h2>
           <p style={{ fontSize: 18, color: 'rgba(255,255,255,0.55)', lineHeight: 1.65, maxWidth: 480, margin: '0 auto 40px' }}>
-            Join 4,000+ organizations already saving time and making more impact with VolunteerFlow.
+            Start free and start making more impact with VolunteerFlow.
           </p>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap' }}>
             <a href="/signup" className="btn-hero-primary" style={{ fontSize: 16 }}>
@@ -848,54 +790,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="footer" style={{ padding: '60px 0 32px' }}>
-        <div className="container">
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 48, marginBottom: 48 }}>
-            <div>
-              <a href="/landing" className="nav-logo" style={{ marginBottom: 16, display: 'flex' }}>
-                <div className="nav-logo-mark" style={{ marginRight: 10 }}>
-                  <Heart className="w-5 h-5 text-white" />
-                </div>
-                <span className="nav-logo-text">VolunteerFlow</span>
-              </a>
-              <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', lineHeight: 1.7, maxWidth: 260 }}>
-                The volunteer management platform built for organizations that want to make a bigger impact.
-              </p>
-            </div>
-            <div>
-              <div className="footer-col-title">Product</div>
-              <a href="#features" className="footer-link">Features</a>
-              <a href="/pricing" className="footer-link">Pricing</a>
-              {['Integrations', 'Changelog'].map((l) => (
-                <a key={l} href="#" className="footer-link">{l}</a>
-              ))}
-            </div>
-            <div>
-              <div className="footer-col-title">Company</div>
-              {['About', 'Blog', 'Careers', 'Contact'].map((l) => (
-                <a key={l} href="#" className="footer-link">{l}</a>
-              ))}
-            </div>
-            <div>
-              <div className="footer-col-title">Support</div>
-              {['Documentation', 'Help Center', 'Status', 'Terms', 'Privacy'].map((l) => (
-                <a key={l} href="#" className="footer-link">{l}</a>
-              ))}
-            </div>
-          </div>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.25)' }}>
-              © 2024 VolunteerFlow. All rights reserved.
-            </p>
-            <div style={{ display: 'flex', gap: 20 }}>
-              {['Privacy', 'Terms', 'Cookies'].map((l) => (
-                <a key={l} href="#" style={{ fontSize: 13, color: 'rgba(255,255,255,0.25)', textDecoration: 'none' }}>{l}</a>
-              ))}
-            </div>
-          </div>
-        </div>
-      </footer>
+      <PublicFooter />
     </div>
   );
 }

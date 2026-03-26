@@ -71,9 +71,8 @@ interface AuditEntry {
   ip?: string;
 }
 
-interface AuditResponse {
-  success: boolean;
-  data: AuditEntry[];
+interface AuditData {
+  entries: AuditEntry[];
   users: string[];
   pagination: { page: number; limit: number; total: number; pages: number };
 }
@@ -169,6 +168,8 @@ export default function AuditPage() {
   const [filterUser, setFilterUser] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterVerb, setFilterVerb] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -177,22 +178,24 @@ export default function AuditPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '50' });
-      if (search)         params.set('search', search);
-      if (filterUser)     params.set('userName', filterUser);
-      if (filterCategory) params.set('category', filterCategory);
-      if (filterVerb)     params.set('verb', filterVerb);
+      if (search)          params.set('search', search);
+      if (filterUser)      params.set('userName', filterUser);
+      if (filterCategory)  params.set('category', filterCategory);
+      if (filterVerb)      params.set('verb', filterVerb);
+      if (filterDateFrom)  params.set('dateFrom', filterDateFrom);
+      if (filterDateTo)    params.set('dateTo', filterDateTo);
 
-      const res = await api.get<AuditResponse>(`/audit?${params}`);
-      setEntries(res.data);
-      setAllUsers(res.users || []);
-      setTotal(res.pagination.total);
-      setPages(res.pagination.pages);
+      const res = await api.get<AuditData>(`/audit?${params}`);
+      setEntries(Array.isArray(res?.entries) ? res.entries : []);
+      setAllUsers(Array.isArray(res?.users) ? res.users : []);
+      setTotal(res?.pagination?.total ?? 0);
+      setPages(res?.pagination?.pages ?? 1);
     } catch {
       // leave existing entries shown
     } finally {
       setLoading(false);
     }
-  }, [page, search, filterUser, filterCategory, filterVerb]);
+  }, [page, search, filterUser, filterCategory, filterVerb, filterDateFrom, filterDateTo]);
 
   useEffect(() => {
     fetchAudit();
@@ -201,7 +204,7 @@ export default function AuditPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPage(1);
-  }, [search, filterUser, filterCategory, filterVerb]);
+  }, [search, filterUser, filterCategory, filterVerb, filterDateFrom, filterDateTo]);
 
   function exportCSV() {
     const headers = ['Timestamp', 'User', 'Role', 'Category', 'Action', 'Resource', 'Detail', 'IP'];
@@ -225,7 +228,7 @@ export default function AuditPage() {
     URL.revokeObjectURL(url);
   }
 
-  const activeFilters = [filterUser, filterCategory, filterVerb].filter(Boolean).length;
+  const activeFilters = [filterUser, filterCategory, filterVerb, filterDateFrom, filterDateTo].filter(Boolean).length;
 
   return (
     <Layout>
@@ -340,10 +343,35 @@ export default function AuditPage() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-xs font-medium text-neutral-500 mb-1">
+                  <Calendar className="inline w-3 h-3 mr-1" />From
+                </label>
+                <input
+                  type="date"
+                  value={filterDateFrom}
+                  onChange={e => setFilterDateFrom(e.target.value)}
+                  className="text-sm border border-neutral-200 dark:border-neutral-600 rounded-lg px-3 py-1.5 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-neutral-500 mb-1">
+                  <Calendar className="inline w-3 h-3 mr-1" />To
+                </label>
+                <input
+                  type="date"
+                  value={filterDateTo}
+                  onChange={e => setFilterDateTo(e.target.value)}
+                  min={filterDateFrom || undefined}
+                  className="text-sm border border-neutral-200 dark:border-neutral-600 rounded-lg px-3 py-1.5 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+
               {activeFilters > 0 && (
                 <div className="flex items-end">
                   <button
-                    onClick={() => { setFilterUser(''); setFilterCategory(''); setFilterVerb(''); }}
+                    onClick={() => { setFilterUser(''); setFilterCategory(''); setFilterVerb(''); setFilterDateFrom(''); setFilterDateTo(''); }}
                     className="text-sm text-danger-600 hover:text-danger-700 font-medium px-2 py-1.5"
                   >
                     Clear all

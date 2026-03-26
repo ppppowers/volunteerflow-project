@@ -8,6 +8,7 @@ import { PermissionGate } from '@/components/staff/PermissionGate';
 import { PLAN_BADGE, STATUS_BADGE } from '@/components/staff/staffOrgUtils';
 import { staffApi, StaffApiError } from '@/lib/staffApi';
 import { useStaffAuth } from '@/context/StaffAuthContext';
+import { useSupportView } from '@/context/SupportViewContext';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,7 +44,7 @@ interface Note {
   created_at: string;
 }
 
-const PLAN_OPTIONS = ['free', 'starter', 'pro', 'enterprise'];
+const PLAN_OPTIONS = ['discover', 'grow'];
 const STATUS_OPTIONS = ['active', 'suspended', 'trial', 'cancelled'];
 
 // ---------------------------------------------------------------------------
@@ -690,6 +691,7 @@ export default function OrgWorkspacePage() {
   const router = useRouter();
   const { id } = router.query as { id: string };
   const { canDo, staffUser } = useStaffAuth();
+  const { enterSupportView } = useSupportView();
 
   // Tab state — driven by URL hash
   const [activeTab, setActiveTab] = useState('overview');
@@ -735,7 +737,6 @@ export default function OrgWorkspacePage() {
 
   // Support view modal state
   const [showSupportModal, setShowSupportModal] = useState(false);
-  const [supportMode, setSupportMode] = useState<'view_only' | 'support'>('view_only');
   const [supportReason, setSupportReason] = useState('');
   const [supportViewError, setSupportViewError] = useState<string | null>(null);
   const [supportViewLoading, setSupportViewLoading] = useState(false);
@@ -810,6 +811,7 @@ export default function OrgWorkspacePage() {
     });
     setEditingOrg(true);
     setSaveError('');
+    handleTabChange('account');
   }
 
   function handleCancelEdit() {
@@ -872,7 +874,6 @@ export default function OrgWorkspacePage() {
 
   // ---- Support view ----
   function handleOpenSupportModal() {
-    setSupportMode('view_only');
     setSupportReason('');
     setSupportViewError(null);
     setShowSupportModal(true);
@@ -885,16 +886,24 @@ export default function OrgWorkspacePage() {
     try {
       const result = await staffApi.post('/support/enter', {
         orgId: org.id,
-        mode: supportMode,
+        mode: 'support',
         reason: supportReason.trim(),
       }) as { sessionId: string; orgId: string; orgName: string; mode: string };
-      sessionStorage.setItem('vf_support_session', JSON.stringify({
+
+      const { orgToken } = await staffApi.post('/support/impersonate', {
+        orgId: org.id,
+        supportSessionId: result.sessionId,
+      }) as { orgToken: string };
+
+      enterSupportView({
         sessionId: result.sessionId,
         orgId: result.orgId,
         orgName: result.orgName,
-        mode: result.mode,
-      }));
-      router.push(`/staff/support/${org.id}`);
+        mode: 'support',
+        startedAt: new Date().toISOString(),
+      }, orgToken);
+
+      window.location.href = '/';
     } catch {
       setSupportViewError('Failed to enter support view. Please try again.');
     } finally {
@@ -1085,23 +1094,6 @@ export default function OrgWorkspacePage() {
                 You are about to enter support view for <strong className="text-gray-200">{org.org_name}</strong>.
                 All actions will be logged.
               </p>
-            </div>
-
-            {/* Mode selector */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Mode
-              </label>
-              <select
-                value={supportMode}
-                onChange={e => setSupportMode(e.target.value as 'view_only' | 'support')}
-                className="w-full bg-gray-800 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500 border border-gray-700"
-              >
-                <option value="view_only">View Only</option>
-                {canDo('support.impersonation') && (
-                  <option value="support">Full Support</option>
-                )}
-              </select>
             </div>
 
             {/* Reason */}

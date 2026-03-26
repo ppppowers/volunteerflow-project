@@ -9,6 +9,7 @@
 
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
 
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -61,7 +62,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     if (response.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('vf_token');
       localStorage.removeItem('vf_user');
-      window.location.href = '/auth';
+      window.location.href = '/landing?mode=signin';
     }
     const message =
       (json as { error?: string })?.error ?? `HTTP ${response.status}: ${response.statusText}`;
@@ -113,7 +114,7 @@ export const api = {
       if (response.status === 401 && typeof window !== 'undefined') {
         localStorage.removeItem('vf_token');
         localStorage.removeItem('vf_user');
-        window.location.href = '/auth';
+        window.location.href = '/landing?mode=signin';
       }
       const message = (json as { error?: string })?.error ?? `HTTP ${response.status}: ${response.statusText}`;
       throw new ApiError(response.status, message, json);
