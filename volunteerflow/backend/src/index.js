@@ -466,6 +466,14 @@ app.get('/api', (_req, res) => {
 // ===== AUTH ROUTES =====
 app.post('/api/auth/register', writeLimiter, async (req, res) => {
   try {
+    try {
+      const sigRow = await pool.query("SELECT value FROM system_settings WHERE key = 'signup_enabled'");
+      if (sigRow.rows.length && sigRow.rows[0].value === false) {
+        const msgRow = await pool.query("SELECT value FROM system_settings WHERE key = 'signup_closed_message'");
+        const msg = typeof msgRow.rows[0]?.value === 'string' ? msgRow.rows[0].value : 'Signups are currently closed.';
+        return res.status(403).json({ success: false, error: msg });
+      }
+    } catch (_) { /* fail open if table not yet ready */ }
     const { fullName, email, password, orgName } = req.body;
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, error: 'A valid email is required' });
