@@ -23,8 +23,11 @@ export function useIdleTimer({
   const [isWarning, setIsWarning] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(60);
 
-  // Keep latest onTimeout in a ref so it's always current without being a dep
+  // Keep mutable values in refs so timer callbacks always read the latest without
+  // causing the effect to re-run or creating stale closures.
   const onTimeoutRef = useRef(onTimeout);
+  const isWarningRef = useRef(false);
+
   useEffect(() => {
     onTimeoutRef.current = onTimeout;
   });
@@ -49,17 +52,14 @@ export function useIdleTimer({
   }, []);
 
   const startIdleTimer = useCallback(() => {
+    clearAllTimers();
     warningTimerRef.current = setTimeout(() => {
+      isWarningRef.current = true;
       setIsWarning(true);
       setSecondsLeft(60);
 
       countdownIntervalRef.current = setInterval(() => {
-        setSecondsLeft((prev) => {
-          if (prev <= 1) {
-            return 0;
-          }
-          return prev - 1;
-        });
+        setSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
       }, 1000);
 
       timeoutTimerRef.current = setTimeout(() => {
@@ -70,23 +70,25 @@ export function useIdleTimer({
   }, [warningMs, timeoutMs, clearAllTimers]);
 
   const reset = useCallback(() => {
-    clearAllTimers();
+    isWarningRef.current = false;
     setIsWarning(false);
     setSecondsLeft(60);
     startIdleTimer();
-  }, [clearAllTimers, startIdleTimer]);
-
-  const handleActivity = useCallback(() => {
-    if (!isWarning) {
-      clearAllTimers();
-      startIdleTimer();
-    }
-  }, [isWarning, clearAllTimers, startIdleTimer]);
+  }, [startIdleTimer]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     startIdleTimer();
+
+    // handleActivity is defined inside the effect so it never appears in the
+    // dependency array — eliminating the re-run-on-isWarning-change bug.
+    // It reads isWarningRef (a ref) to avoid a stale closure on isWarning state.
+    const handleActivity = () => {
+      if (!isWarningRef.current) {
+        startIdleTimer();
+      }
+    };
 
     const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'] as const;
     events.forEach((event) => document.addEventListener(event, handleActivity, { passive: true }));
@@ -95,7 +97,10 @@ export function useIdleTimer({
       clearAllTimers();
       events.forEach((event) => document.removeEventListener(event, handleActivity));
     };
-  }, [handleActivity, startIdleTimer, clearAllTimers]);
+  }, [startIdleTimer, clearAllTimers]);
+  // deps: startIdleTimer changes when warningMs/timeoutMs change — correct, we
+  // want to restart the timer when the thresholds change (e.g. auth confirmed).
+  // handleActivity is NOT a dep because it's defined inside the effect.
 
   return { isWarning, secondsLeft, reset };
 }
