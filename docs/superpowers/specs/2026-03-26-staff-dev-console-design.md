@@ -89,7 +89,7 @@ No other endpoint changes are needed for this feature.
 
 ### New page: `volunteerflow/frontend/src/pages/staff/dev.tsx`
 
-- Wraps in `<StaffLayout>` + `<PermissionGate requiredPerm={PERMISSIONS.FEATURE_FLAGS_MANAGE}>`
+- Wraps in `<StaffLayout>` + `<PermissionGate perm={PERMISSIONS.FEATURE_FLAGS_MANAGE}>` (the prop is `perm`, not `requiredPerm` — verified in `PermissionGate.tsx`)
 - Loads all settings via `staffApi.get('/settings')` on mount
 - Two sections, described below
 
@@ -125,7 +125,14 @@ Flags are grouped by category: Core → Beta → Experimental → Deprecated.
 
 ## Sidebar
 
-In `volunteerflow/frontend/src/components/staff/StaffSidebar.tsx`, add a "Dev Console" link at the bottom of the nav list (above or below Help, if present), rendered only when `canDo(permissions, PERMISSIONS.FEATURE_FLAGS_MANAGE)` is true. Uses `<Link href="/staff/dev">` with an appropriate Lucide icon (e.g. `Terminal` or `Wrench`).
+In `volunteerflow/frontend/src/components/staff/StaffSidebar.tsx`, add a "Dev Console" link at the bottom of the nav list.
+
+The current sidebar renders a static `NAV_ITEMS` list with no permission gating. To gate the Dev Console link:
+- Import `useStaffAuth` from `@/context/StaffAuthContext`
+- Destructure `permissions` from the hook
+- Render the Dev Console link only when `permissions.includes(PERMISSIONS.FEATURE_FLAGS_MANAGE)`
+
+Uses `<Link href="/staff/dev">` with a `Terminal` or `Wrench` Lucide icon.
 
 ---
 
