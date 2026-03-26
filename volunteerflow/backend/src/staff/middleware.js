@@ -1,7 +1,7 @@
 'use strict';
 const jwt = require('jsonwebtoken');
 
-const STALE_MINUTES = 5;
+const STALE_MINUTES = 10;
 const MAX_SESSION_HOURS = 4;
 
 // requireStaffAuth(pool) — call as requireStaffAuth(pool) to get middleware fn
@@ -28,7 +28,7 @@ function requireStaffAuth(pool) {
       `UPDATE staff_sessions SET is_active = false
        WHERE is_active = true AND (
          last_seen < NOW() - ($1 * INTERVAL '1 minute')
-         OR started_at < NOW() - ($2 * INTERVAL '1 hour')
+         OR created_at < NOW() - ($2 * INTERVAL '1 hour')
        )`,
       [STALE_MINUTES, MAX_SESSION_HOURS]
     );

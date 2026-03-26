@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useStaffAuth } from '../../context/StaffAuthContext';
-import { SupportBanner } from './SupportBanner';
 import { StaffSidebar } from './StaffSidebar';
 import { StaffHeader } from './StaffHeader';
 import { Permission } from '../../lib/staffPermissions';
+import { useIdleTimer } from '@/hooks/useIdleTimer';
+import { IdleWarningModal } from '@/components/IdleWarningModal';
 
 interface Props {
   children: React.ReactNode;
@@ -18,6 +19,22 @@ export function StaffLayout({ children, requiredPerm }: Props) {
   useEffect(() => {
     if (!isLoading && !isAuthenticated) router.replace('/staff/login');
   }, [isLoading, isAuthenticated, router]);
+
+  function staffLogout() {
+    fetch('/api/staff/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + localStorage.getItem('vf_staff_token') },
+    }).catch(() => {});
+    localStorage.removeItem('vf_staff_token');
+    localStorage.removeItem('vf_staff_user');
+    window.location.href = '/staff/login';
+  }
+
+  const { isWarning, secondsLeft, reset } = useIdleTimer({
+    warningMs: isAuthenticated ? 9 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
+    timeoutMs: isAuthenticated ? 10 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
+    onTimeout: staffLogout,
+  });
 
   if (isLoading) return <div className="flex h-screen items-center justify-center bg-gray-950 text-gray-400">Loading...</div>;
   if (!isAuthenticated) return null;
@@ -34,7 +51,13 @@ export function StaffLayout({ children, requiredPerm }: Props) {
 
   return (
     <div className="flex h-screen bg-gray-950">
-      <SupportBanner />
+      <IdleWarningModal
+        variant="staff"
+        isWarning={isWarning}
+        secondsLeft={secondsLeft}
+        onStay={reset}
+        onLogout={staffLogout}
+      />
       <StaffSidebar />
       <div className="flex flex-col flex-1 overflow-hidden">
         <StaffHeader />

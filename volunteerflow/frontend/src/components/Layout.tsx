@@ -4,6 +4,8 @@ import { ReactNode, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Header from './Header';
 import Sidebar from './Sidebar';
+import { useIdleTimer } from '@/hooks/useIdleTimer';
+import { IdleWarningModal } from '@/components/IdleWarningModal';
 
 interface LayoutProps {
   children: ReactNode;
@@ -14,11 +16,25 @@ export default function Layout({ children }: LayoutProps) {
   // 'checking' avoids the blank-flash while we read localStorage
   const [authState, setAuthState] = useState<'checking' | 'authed' | 'redirecting'>('checking');
 
+  const isAuthed = authState === 'authed';
+
+  function orgLogout() {
+    localStorage.removeItem('vf_token');
+    localStorage.removeItem('vf_user');
+    window.location.href = '/landing?mode=signin';
+  }
+
+  const { isWarning, secondsLeft, reset } = useIdleTimer({
+    warningMs: isAuthed ? 9 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
+    timeoutMs: isAuthed ? 10 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
+    onTimeout: orgLogout,
+  });
+
   useEffect(() => {
     const token = localStorage.getItem('vf_token');
     if (!token) {
       setAuthState('redirecting');
-      router.replace('/auth');
+      router.replace('/landing');
       return;
     }
     // Decode the JWT payload (client-side only — no secret needed, just check expiry)
@@ -28,7 +44,7 @@ export default function Layout({ children }: LayoutProps) {
         localStorage.removeItem('vf_token');
         localStorage.removeItem('vf_user');
         setAuthState('redirecting');
-        router.replace('/auth');
+        router.replace('/landing');
         return;
       }
       setAuthState('authed');
@@ -36,7 +52,7 @@ export default function Layout({ children }: LayoutProps) {
       localStorage.removeItem('vf_token');
       localStorage.removeItem('vf_user');
       setAuthState('redirecting');
-      router.replace('/auth');
+      router.replace('/landing');
     }
   }, [router]);
 
@@ -54,6 +70,13 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900 flex transition-colors">
+      <IdleWarningModal
+        variant="org"
+        isWarning={isWarning}
+        secondsLeft={secondsLeft}
+        onStay={reset}
+        onLogout={orgLogout}
+      />
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <Header />
