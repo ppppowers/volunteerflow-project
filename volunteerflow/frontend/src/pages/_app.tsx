@@ -41,6 +41,10 @@ const ACCENT_PALETTES: Record<string, Record<string, string>> = {
 function PlanLoader() {
   const { setPlan } = usePlan();
   useEffect(() => {
+    // Guard required: api client redirects to login on 401, which would
+    // create an infinite loop on public pages (landing, pricing, signup).
+    const token = localStorage.getItem('vf_token');
+    if (!token) return;
     api.get<{ plan: string }>('/billing/plan')
       .then(res => {
         const plan = res?.plan;
@@ -48,7 +52,7 @@ function PlanLoader() {
           setPlan(plan as PlanId);
         }
       })
-      .catch(() => { /* unauthenticated or network error — stay on discover */ });
+      .catch(() => { /* expired token or network error — stay on discover */ });
   }, [setPlan]);
   return null;
 }
