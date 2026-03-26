@@ -535,6 +535,21 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_help_content_published ON help_content(published);
   CREATE INDEX IF NOT EXISTS idx_help_content_order     ON help_content(type, sort_order);
 
+  -- ── Feedback & suggestions ────────────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS feedback (
+    id          TEXT        PRIMARY KEY,
+    org_id      TEXT        NOT NULL,
+    org_name    TEXT        NOT NULL DEFAULT '',
+    type        TEXT        NOT NULL CHECK (type IN ('suggestion', 'feedback')),
+    message     TEXT        NOT NULL,
+    status      TEXT        NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'reviewed')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_feedback_org_id  ON feedback (org_id);
+  CREATE INDEX IF NOT EXISTS idx_feedback_status  ON feedback (status);
+  CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at DESC);
+
   -- ── System settings (global key/value store) ─────────────────────────────────
   CREATE TABLE IF NOT EXISTS system_settings (
     key         TEXT        PRIMARY KEY,
