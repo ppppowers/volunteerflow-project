@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import Head from "next/head";
 import { api, ApiError } from "@/lib/api";
+import { SignInModal } from "@/components/SignInModal";
 
 // ─── ICONS ────────────────────────────────────────────────────────────────────
 
@@ -94,11 +95,7 @@ const styles = `
     display: flex; align-items: center; gap: 10px;
     text-decoration: none; margin-bottom: 56px; position: relative; z-index: 1;
   }
-  .panel-logo-mark {
-    width: 40px; height: 40px; background: linear-gradient(135deg, var(--sage-light), var(--mint));
-    border-radius: 10px; display: flex; align-items: center; justify-content: center;
-    color: var(--forest); box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  }
+  .panel-logo-img { width: 64px; height: 64px; flex-shrink: 0; }
   .panel-logo-text {
     font-family: 'Playfair Display', serif; color: var(--warm-white);
     font-size: 20px; font-weight: 600; letter-spacing: -0.3px;
@@ -604,16 +601,16 @@ function SignInPage({ onSuccess, onGoSignUp }: { onSuccess: () => void; onGoSign
         <div className="panel-blob panel-blob-1" />
         <div className="panel-blob panel-blob-2" />
         <div className="panel-logo">
-          <div className="panel-logo-mark"><HeartIcon size={18} /></div>
+          <img src="/vf-logo.png" className="panel-logo-img" alt="" aria-hidden="true" />
           <span className="panel-logo-text">VolunteerFlow</span>
         </div>
         <h2 className="panel-headline">Welcome<br />back to your <span>mission.</span></h2>
         <p className="panel-desc">Sign in and continue making a difference. Your volunteers and events are waiting for you.</p>
         <div className="panel-stats">
           {[
-            { value: "12,400+", label: "Active Volunteers" },
-            { value: "3,200+", label: "Events Managed" },
-            { value: "98%", label: "Coordinator Satisfaction" },
+            { value: "Free", label: "30-day trial included" },
+            { value: "5 min", label: "Average setup time" },
+            { value: "24/7", label: "Support for every plan" },
           ].map(s => (
             <div className="panel-stat" key={s.label}>
               <div className="panel-stat-icon"><HeartIcon size={16} /></div>
@@ -737,10 +734,10 @@ function SignUpPage({ onSuccess, onGoSignIn }: { onSuccess: () => void; onGoSign
         <div className="panel-blob panel-blob-1" />
         <div className="panel-blob panel-blob-2" />
         <div className="panel-logo">
-          <div className="panel-logo-mark"><HeartIcon size={18} /></div>
+          <img src="/vf-logo.png" className="panel-logo-img" alt="" aria-hidden="true" />
           <span className="panel-logo-text">VolunteerFlow</span>
         </div>
-        <h2 className="panel-headline">Join <span>thousands</span> of nonprofits already growing.</h2>
+        <h2 className="panel-headline">Start coordinating volunteers<br /><span>from day one.</span></h2>
         <p className="panel-desc">Create your account in under two minutes and start coordinating volunteers, events, and applications from day one.</p>
         <div className="panel-stats">
           {[
@@ -839,7 +836,7 @@ const PLANS = {
   discover: {
     name: "Discover", monthly: 49, yearly: 41,
     desc: "Everything you need to launch your volunteer program and start making an impact.",
-    features: ["2 admin seats", "Unlimited volunteers & events", "Email & SMS messaging", "10,000 SMS / year", "Automated reminders & templates", "CSV export & mobile app"],
+    features: ["2 admin seats", "Unlimited volunteers & events", "Email & SMS messaging", "10,000 SMS / year", "Automated reminders & templates", "CSV export & mobile-friendly"],
   },
   grow: {
     name: "Grow", monthly: 149, yearly: 124,
@@ -1034,6 +1031,17 @@ export default function AuthPage() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [selectedPlan, setSelectedPlan] = useState<PlanKey>("discover");
   const [yearly, setYearly] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
+
+  // Auto-open sign-in modal when redirected here with ?mode=signin (e.g. from 401 handler)
+  useEffect(() => {
+    if (router.isReady && router.query.mode === "signin") {
+      setSignInOpen(true);
+      // Remove ?mode=signin so re-renders / back-navigation don't re-open the modal
+      const { mode: _mode, ...rest } = router.query;
+      router.replace({ pathname: router.pathname, query: rest }, undefined, { shallow: true });
+    }
+  }, [router.isReady, router.query.mode]);
 
   const handleAuthSuccess = () => {
     router.push("/");
@@ -1042,26 +1050,20 @@ export default function AuthPage() {
   return (
     <div className="auth-page">
       <Head>
-        <title>Sign In — VolunteerFlow</title>
-        <meta name="description" content="Sign in to your VolunteerFlow nonprofit management dashboard." />
+        <title>VolunteerFlow</title>
+        <meta name="description" content="Manage volunteers, events, and applications with VolunteerFlow." />
       </Head>
       <style dangerouslySetInnerHTML={{ __html: styles }} />
       {screen === "landing" && (
         <LandingPage
-          onSignIn={() => setScreen("signin")}
+          onSignIn={() => setSignInOpen(true)}
           onSignUp={() => setScreen("signup")}
-        />
-      )}
-      {screen === "signin" && (
-        <SignInPage
-          onSuccess={handleAuthSuccess}
-          onGoSignUp={() => setScreen("signup")}
         />
       )}
       {screen === "signup" && (
         <SignUpPage
           onSuccess={() => setScreen("pricing")}
-          onGoSignIn={() => setScreen("signin")}
+          onGoSignIn={() => setSignInOpen(true)}
         />
       )}
       {screen === "pricing" && (
@@ -1080,6 +1082,7 @@ export default function AuthPage() {
           onEnter={handleAuthSuccess}
         />
       )}
+      <SignInModal open={signInOpen} onClose={() => setSignInOpen(false)} />
     </div>
   );
 }
