@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
-  Heart, Eye, EyeOff, Check, ArrowRight, Shield,
+  Eye, EyeOff, Check, ArrowRight, Shield,
   Users, Clock, Zap, Star, ChevronRight,
 } from 'lucide-react';
 
@@ -236,8 +236,20 @@ export default function SignupPage() {
   const [success, setSuccess] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState('');
   const [selectedPlan, setSelectedPlan] = useState('discover');
   const [errors, setErrors] = useState<FormErrors>({});
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+  const [wizardSaving, setWizardSaving] = useState(false);
+  const [wizard, setWizard] = useState({
+    orgName: '',
+    description: '',
+    website: '',
+    orgEmail: '',
+    phone: '',
+    taxId: '',
+    address: '',
+  });
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
@@ -271,17 +283,38 @@ export default function SignupPage() {
 
   const strength = pwStrength(form.password);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const e = validate();
     setErrors(e);
     if (Object.keys(e).length) return;
     setLoading(true);
-    setTimeout(() => {
+    setApiError('');
+    try {
+      const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
+      const res = await fetch(`${base}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: `${form.firstName.trim()} ${form.lastName.trim()}`,
+          email: form.email.trim(),
+          password: form.password,
+          orgName: form.orgName.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setApiError(json.error || 'Something went wrong. Please try again.');
+        setLoading(false);
+        return;
+      }
+      localStorage.setItem('vf_token', json.data.token);
+      setWizard((w) => ({ ...w, orgName: form.orgName.trim() }));
       setLoading(false);
       setSuccess(true);
-      localStorage.setItem('vf_authed', 'true');
-      setTimeout(() => router.push('/'), 2500);
-    }, 1400);
+    } catch {
+      setApiError('Could not reach the server. Please try again.');
+      setLoading(false);
+    }
   };
 
   const VALUE_ITEMS = [
@@ -301,12 +334,12 @@ export default function SignupPage() {
           <div className="signup-left-mesh" />
           <div className="signup-left-grid" />
           <a href="/landing" className="sp-logo">
-            <div className="sp-logo-mark"><Heart className="w-4 h-4 text-white" /></div>
+            <img src="/vf-logo.png" className="w-12 h-12" alt="" aria-hidden="true" />
             <span className="sp-logo-text">VolunteerFlow</span>
           </a>
 
           <h1 className="sp-left-headline">
-            Join 4,000+ organizations<br />
+            Built for organizations<br />
             <em>making a difference</em>
           </h1>
           <p className="sp-left-sub">
@@ -330,25 +363,6 @@ export default function SignupPage() {
             })}
           </div>
 
-          <div className="sp-testimonial">
-            <div style={{ display: 'flex', gap: 2, marginBottom: 12 }}>
-              {[...Array(5)].map((_, i) => (
-                <Star key={i} className="w-3.5 h-3.5" style={{ color: '#f59e0b', fill: '#f59e0b' }} />
-              ))}
-            </div>
-            <p className="sp-testimonial-quote">
-              "Setup literally took 12 minutes. We had our first event live and volunteers signing up the same day."
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>
-                AK
-              </div>
-              <div>
-                <div className="sp-testimonial-author">Aisha K.</div>
-                <div className="sp-testimonial-role">Director of Programs, Bright Future Foundation</div>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Right panel */}
@@ -385,7 +399,7 @@ export default function SignupPage() {
                       <h1 className="sp-form-title">Start your free trial</h1>
                       <p className="sp-form-sub">30 days free · No credit card required</p>
                     </div>
-                    <a href="/auth" style={{ fontSize: 13, color: '#64748b', textDecoration: 'none', fontWeight: 500 }}>
+                    <a href="/landing?mode=signin" style={{ fontSize: 13, color: '#64748b', textDecoration: 'none', fontWeight: 500 }}>
                       Sign in →
                     </a>
                   </div>
@@ -529,6 +543,12 @@ export default function SignupPage() {
                   <a href="#" style={{ color: '#10b981', textDecoration: 'underline' }}>Privacy Policy</a>.
                 </p>
 
+                {apiError && (
+                  <p style={{ fontSize: 13, color: '#f87171', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+                    {apiError}
+                  </p>
+                )}
+
                 <button className="sp-submit" onClick={handleSubmit} disabled={loading}>
                   {loading ? (
                     <>
@@ -542,7 +562,7 @@ export default function SignupPage() {
 
                 <div className="sp-trust">
                   {[
-                    { icon: Shield, text: 'SOC 2 certified' },
+                    { icon: Shield, text: 'Data encrypted' },
                     { icon: Check, text: 'No credit card' },
                     { icon: Zap, text: 'Free 30 days' },
                   ].map(({ icon: Icon, text }) => (
