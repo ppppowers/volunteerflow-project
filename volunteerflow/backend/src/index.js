@@ -161,7 +161,11 @@ async function requireAuth(req, res, next) {
 const PLAN_ORDER = ['discover', 'grow', 'enterprise'];
 
 function requirePlan(...requiredPlans) {
-  const minLevel = Math.min(...requiredPlans.map(p => PLAN_ORDER.indexOf(p)));
+  const minLevel = Math.min(...requiredPlans.map(p => {
+    const idx = PLAN_ORDER.indexOf(p);
+    if (idx === -1) throw new Error(`requirePlan: unknown plan "${p}"`);
+    return idx;
+  }));
   return async (req, res, next) => {
     try {
       const { rows } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.sub]);
@@ -2272,7 +2276,7 @@ app.delete('/api/people/groups/:id', requireAuth, requirePlan('grow'), writeLimi
 
 // ─── Application Templates ────────────────────────────────────────────────────
 
-app.get('/api/application-templates', requireAuth, async (req, res) => {
+app.get('/api/application-templates', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT * FROM application_templates WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]
@@ -2284,7 +2288,7 @@ app.get('/api/application-templates', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/application-templates', requireAuth, writeLimiter, async (req, res) => {
+app.post('/api/application-templates', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
     const { name, description, questions, status } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -2310,7 +2314,7 @@ app.post('/api/application-templates', requireAuth, writeLimiter, async (req, re
   }
 });
 
-app.put('/api/application-templates/:id', requireAuth, writeLimiter, async (req, res) => {
+app.put('/api/application-templates/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
     const { name, description, questions, status } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -2336,7 +2340,7 @@ app.put('/api/application-templates/:id', requireAuth, writeLimiter, async (req,
   }
 });
 
-app.delete('/api/application-templates/:id', requireAuth, writeLimiter, async (req, res) => {
+app.delete('/api/application-templates/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
   try {
     await pool.query('DELETE FROM application_templates WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     logAudit({ req, category: 'settings', verb: 'deleted', resource: 'Application Template', detail: req.params.id });
@@ -2413,7 +2417,7 @@ app.post('/api/form-submissions/public', writeLimiter, async (req, res) => {
   }
 });
 
-app.get('/api/form-submissions', requireAuth, async (req, res) => {
+app.get('/api/form-submissions', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { status, templateId } = req.query;
     const conditions = [`org_id = $1`];
@@ -2441,7 +2445,7 @@ app.get('/api/form-submissions', requireAuth, async (req, res) => {
   }
 });
 
-app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
+app.put('/api/form-submissions/:id', requireAuth, requirePlan('grow'), async (req, res) => {
   try {
     const { status } = req.body;
     if (!['APPROVED', 'REJECTED', 'PENDING'].includes(status)) {
