@@ -1,18 +1,18 @@
-# Onboarding Walkthrough Implementation Plan
+# Onboarding Walkthrough Design
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace the post-signup success screen with a 3-step wizard that collects org profile data and saves it to org_settings.
 
-**Architecture:** All changes are contained in `signup.tsx`. The existing success state (`success === true`) currently triggers an auto-redirect after 2 seconds; that redirect is removed and replaced by the wizard. On finish, the wizard calls the existing `PUT /api/settings` endpoint, then redirects to `/`. On skip, it redirects immediately without saving.
+**Architecture:** All changes are contained in `signup.tsx`. The existing success state (`success === true`) currently triggers an auto-redirect after 2 seconds; that redirect is removed and replaced by the wizard. On finish, the wizard saves via raw `fetch` (not `api.put` — see Save Behavior), then redirects to `/`. On skip, it redirects immediately without saving.
 
-**Tech Stack:** React (Pages Router), existing `api.put('/settings', ...)` endpoint, Tailwind CSS, Lucide icons.
+**Tech Stack:** React (Pages Router), raw `fetch` for the wizard save call, Tailwind CSS, Lucide icons.
 
 ---
 
 ## Trigger
 
-After `handleSubmit` sets `setSuccess(true)`, the wizard renders inside the same signup card instead of the current "You're all set!" screen. The `setTimeout(() => router.push('/'), 2000)` is removed entirely.
+After `handleSubmit` sets `setSuccess(true)`, the wizard renders inside the same signup card instead of the current "You're all set!" screen. The `setTimeout(() => router.push('/'), 2000)` is **removed entirely** from `handleSubmit`.
 
 ---
 
@@ -36,7 +36,7 @@ After `handleSubmit` sets `setSuccess(true)`, the wizard renders inside the same
 
 ```
 ┌─────────────────────────────────────────────┐
-│  ● ● ○  Step 1 of 3          Skip setup →   │
+│  ● ○ ○  Step 1 of 3          Skip setup →   │
 │─────────────────────────────────────────────│
 │  Your Organization                           │
 │  Tell us a bit about your org                │
@@ -48,21 +48,23 @@ After `handleSubmit` sets `setSuccess(true)`, the wizard renders inside the same
 └─────────────────────────────────────────────┘
 ```
 
-- **Progress dots:** 3 dots — filled (completed), active ring (current), empty (upcoming)
+- **Progress dots:** 3 dots — `●` filled green (completed steps), `●` filled green with ring (current step), `○` empty grey (upcoming). On step 1: `● ○ ○`. On step 2: `● ● ○`. On step 3: `● ● ●`.
 - **"Skip setup →"** link top-right — redirects to `/` immediately, no save
 - **Back button** — hidden on step 1, visible on steps 2–3
-- **Next/Finish button** — "Next →" on steps 1–2, "Finish →" on step 3 with loading state during save
+- **Next/Finish button** — "Next →" on steps 1–2, "Finish →" on step 3
+- **Loading state on Finish:** use a separate `wizardSaving` boolean state (not the existing `loading` state which is used by the signup form submit button)
 
 ---
 
 ## Data & State
 
-New state added to `PeoplePage` (actually to the signup page — this is within `signup.tsx`):
+New state added inside the `SignupPage` component in `signup.tsx`:
 
 ```ts
 const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+const [wizardSaving, setWizardSaving] = useState(false);
 const [wizard, setWizard] = useState({
-  orgName: '',      // pre-filled from form.orgName on wizard mount
+  orgName: form.orgName,   // inline initialization — form.orgName is populated before success is set
   description: '',
   website: '',
   orgEmail: '',
@@ -72,37 +74,63 @@ const [wizard, setWizard] = useState({
 });
 ```
 
-The `wizard.orgName` is initialized from `form.orgName` when `success` transitions to `true` (via `useEffect` or inline initialization).
+**Important:** Initialize `wizard` with `useState({ orgName: form.orgName, ... })` inline — do NOT use a `useEffect` to copy `form.orgName` after `success` transitions. `form.orgName` is already populated at the time the wizard state is declared, so inline initialization is correct and avoids a one-render flash with an empty org name field.
 
 ---
 
 ## Save Behavior
 
-- **Finish (step 3):** Call `api.put('/settings', { orgName, description, website, orgEmail, phone, taxId, address })` → on success or error, redirect to `/`.
-- **Skip (any step):** Redirect to `/` immediately. No save.
-- **Back:** Navigate to previous step. No save.
-- **All fields optional:** No validation needed on wizard steps.
+**On Finish (step 3):**
+
+Use raw `fetch` instead of `api.put` to avoid the automatic 401→redirect-to-login behavior built into `api.ts`. The JWT token was just written to `localStorage` and the user is not yet in a fully authenticated browser session from `api.ts`'s perspective.
+
+```ts
+const handleWizardFinish = async () => {
+  setWizardSaving(true);
+  try {
+    const token = localStorage.getItem('vf_token');
+    const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
+    await fetch(`${base}/settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(wizard),
+    });
+  } catch {
+    // silent fail — user can fill in settings manually
+  } finally {
+    router.push('/');
+  }
+};
+```
+
+- **Skip (any step):** `router.push('/')` immediately. No save.
+- **Back:** `setWizardStep((s) => (s - 1) as 1 | 2 | 3)`. No save.
+- **All fields optional:** No validation needed on any wizard step.
 
 ---
 
 ## Backend
 
-No changes required. The existing `PUT /api/settings` endpoint in `index.js` already accepts and persists all 7 fields to `org_settings`.
+No changes required. The existing `PUT /api/settings` endpoint in `index.js` already accepts and persists all 7 fields (`orgName`, `description`, `website`, `orgEmail`, `phone`, `taxId`, `address`) to `org_settings`.
 
 ---
 
 ## Files Changed
 
-- **Modify:** `volunteerflow/frontend/src/pages/signup.tsx`
+- **Modify only:** `volunteerflow/frontend/src/pages/signup.tsx`
   - Remove `setTimeout(() => router.push('/'), 2000)` from `handleSubmit`
-  - Add `wizardStep` and `wizard` state
-  - Replace the success screen JSX with the wizard component (inline function or extracted component at top of file)
-  - On finish: call `api.put('/settings', wizard)` then `router.push('/')`
-  - On skip: call `router.push('/')`
+  - Add `wizardStep`, `wizardSaving`, and `wizard` state declarations
+  - Replace the `success === true` JSX branch (the "You're all set!" card) with the wizard UI
+  - Implement `handleWizardFinish` using raw `fetch` as shown above
+  - Implement skip: `router.push('/')`
 
 ---
 
 ## Error Handling
 
-- If the `PUT /api/settings` call fails on finish: log the error, redirect to dashboard anyway (org can fill in settings manually). Do not block the user.
+- If the `fetch` to `PUT /api/settings` fails (network error, non-401 server error): catch silently, redirect to dashboard anyway. The org can complete their profile in Settings → Organization.
+- If a 401 is returned: the raw `fetch` does NOT redirect — it simply throws or returns a non-ok response, which the try/catch handles by redirecting to dashboard anyway.
 - No field validation on wizard steps — all fields are optional.
