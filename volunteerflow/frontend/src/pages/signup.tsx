@@ -410,6 +410,7 @@ export default function SignupPage() {
                     </span>
                   </div>
                   <button
+                    type="button"
                     onClick={() => router.push('/')}
                     style={{ fontSize: 13, color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif' }}
                   >
@@ -435,8 +436,9 @@ export default function SignupPage() {
                 {wizardStep === 1 && (
                   <>
                     <div className="sp-field">
-                      <label className="sp-label">Organization Name</label>
+                      <label className="sp-label" htmlFor="wizard-orgName">Organization Name</label>
                       <input
+                        id="wizard-orgName"
                         className="sp-input"
                         type="text"
                         placeholder="Green Future Foundation"
@@ -445,8 +447,9 @@ export default function SignupPage() {
                       />
                     </div>
                     <div className="sp-field">
-                      <label className="sp-label">Description</label>
+                      <label className="sp-label" htmlFor="wizard-description">Description</label>
                       <textarea
+                        id="wizard-description"
                         className="sp-input"
                         placeholder="What does your organization do?"
                         value={wizard.description}
@@ -462,18 +465,20 @@ export default function SignupPage() {
                 {wizardStep === 2 && (
                   <>
                     <div className="sp-field">
-                      <label className="sp-label">Website</label>
+                      <label className="sp-label" htmlFor="wizard-website">Website</label>
                       <input
+                        id="wizard-website"
                         className="sp-input"
-                        type="text"
+                        type="url"
                         placeholder="https://yourorg.org"
                         value={wizard.website}
                         onChange={(e) => setWizard((w) => ({ ...w, website: e.target.value }))}
                       />
                     </div>
                     <div className="sp-field">
-                      <label className="sp-label">Contact Email</label>
+                      <label className="sp-label" htmlFor="wizard-orgEmail">Contact Email</label>
                       <input
+                        id="wizard-orgEmail"
                         className="sp-input"
                         type="email"
                         placeholder="hello@yourorg.org"
@@ -482,8 +487,9 @@ export default function SignupPage() {
                       />
                     </div>
                     <div className="sp-field">
-                      <label className="sp-label">Phone Number</label>
+                      <label className="sp-label" htmlFor="wizard-phone">Phone Number</label>
                       <input
+                        id="wizard-phone"
                         className="sp-input"
                         type="tel"
                         placeholder="+1 (555) 000-0000"
@@ -498,8 +504,9 @@ export default function SignupPage() {
                 {wizardStep === 3 && (
                   <>
                     <div className="sp-field">
-                      <label className="sp-label">Tax ID / EIN</label>
+                      <label className="sp-label" htmlFor="wizard-taxId">Tax ID / EIN</label>
                       <input
+                        id="wizard-taxId"
                         className="sp-input"
                         type="text"
                         placeholder="12-3456789"
@@ -508,8 +515,9 @@ export default function SignupPage() {
                       />
                     </div>
                     <div className="sp-field">
-                      <label className="sp-label">Address</label>
+                      <label className="sp-label" htmlFor="wizard-address">Address</label>
                       <textarea
+                        id="wizard-address"
                         className="sp-input"
                         placeholder="123 Main St, City, State 12345"
                         value={wizard.address}
@@ -526,6 +534,7 @@ export default function SignupPage() {
                   <div>
                     {wizardStep > 1 && (
                       <button
+                        type="button"
                         onClick={() => setWizardStep((s) => (s - 1) as 1 | 2 | 3)}
                         style={{ fontSize: 14, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', padding: '10px 0' }}
                       >
