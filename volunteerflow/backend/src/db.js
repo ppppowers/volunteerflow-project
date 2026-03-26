@@ -17,33 +17,141 @@ pool.on('error', (err) => {
 // ── Schema ────────────────────────────────────────────────────────────────────
 
 const SCHEMA_SQL = `
+  -- ── Users (one row = one organisation owner or team member) ──────────────────
   CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,
-    email         TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    full_name     TEXT NOT NULL DEFAULT '',
-    org_name      TEXT NOT NULL DEFAULT '',
-    role          TEXT NOT NULL DEFAULT 'admin',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                     TEXT        PRIMARY KEY,
+    org_id                 TEXT        NOT NULL DEFAULT '',   -- owner: same as id; team member: owner's id
+    email                  TEXT        UNIQUE NOT NULL,
+    password_hash          TEXT        NOT NULL,
+    full_name              TEXT        NOT NULL DEFAULT '',
+    org_name               TEXT        NOT NULL DEFAULT '',
+    role                   TEXT        NOT NULL DEFAULT 'admin',
+    plan                   TEXT        NOT NULL DEFAULT 'discover',
+    billing_cycle          TEXT        NOT NULL DEFAULT 'monthly',
+    plan_updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    two_factor_enabled     BOOLEAN     NOT NULL DEFAULT FALSE,
+    two_factor_secret      TEXT,
+    session_timeout        TEXT        NOT NULL DEFAULT '8',
+    status                 TEXT        NOT NULL DEFAULT 'active',
+    contact_name           TEXT        NOT NULL DEFAULT '',
+    contact_email          TEXT        NOT NULL DEFAULT '',
+    last_login             TIMESTAMPTZ,
+    stripe_customer_id     TEXT,
+    stripe_subscription_id TEXT,
+    paypal_subscription_id TEXT,
+    billing_provider       TEXT,
+    subscription_status    TEXT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- ── Organisation settings (one row per org, id = users.id of owner) ──────────
+  CREATE TABLE IF NOT EXISTS org_settings (
+    id                   TEXT     PRIMARY KEY,
+    email_from_name      TEXT     NOT NULL DEFAULT '',
+    email_from_address   TEXT     NOT NULL DEFAULT '',
+    sms_from_name        TEXT     NOT NULL DEFAULT '',
+    org_name             TEXT     NOT NULL DEFAULT '',
+    website              TEXT     NOT NULL DEFAULT '',
+    org_email            TEXT     NOT NULL DEFAULT '',
+    phone                TEXT     NOT NULL DEFAULT '',
+    address              TEXT     NOT NULL DEFAULT '',
+    timezone             TEXT     NOT NULL DEFAULT 'America/New_York',
+    language             TEXT     NOT NULL DEFAULT 'English (US)',
+    description          TEXT     NOT NULL DEFAULT '',
+    tax_id               TEXT     NOT NULL DEFAULT '',
+    logo_url             TEXT     NOT NULL DEFAULT '',
+    logo_base64          TEXT     NOT NULL DEFAULT '',
+    notif_prefs          JSONB    NOT NULL DEFAULT '{}',
+    portal_name          TEXT     NOT NULL DEFAULT '',
+    portal_subdomain     TEXT     NOT NULL DEFAULT '',
+    brand_primary        TEXT     NOT NULL DEFAULT '#10b981',
+    brand_accent         TEXT     NOT NULL DEFAULT '#0d9488',
+    welcome_heading      TEXT     NOT NULL DEFAULT '',
+    welcome_subtext      TEXT     NOT NULL DEFAULT '',
+    footer_text          TEXT     NOT NULL DEFAULT '',
+    show_powered_by      BOOLEAN  NOT NULL DEFAULT TRUE,
+    retention_volunteers TEXT     NOT NULL DEFAULT '12',
+    retention_events     TEXT     NOT NULL DEFAULT '36',
+    retention_applications TEXT   NOT NULL DEFAULT '24',
+    volunteer_form_id    TEXT,
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- ── Org roles (system-wide; shared across all orgs) ───────────────────────────
+  CREATE TABLE IF NOT EXISTS org_roles (
+    id          TEXT    PRIMARY KEY,
+    name        TEXT    NOT NULL,
+    description TEXT    NOT NULL DEFAULT '',
+    color       TEXT    NOT NULL DEFAULT 'bg-gray-500',
+    permissions JSONB   NOT NULL DEFAULT '{}',
+    is_system   BOOLEAN NOT NULL DEFAULT FALSE,
+    sort_order  INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- ── User sessions ─────────────────────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS user_sessions (
+    id         TEXT        PRIMARY KEY,
+    user_id    TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_agent TEXT        NOT NULL DEFAULT '',
+    ip_address TEXT        NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- ── Invoices ──────────────────────────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS invoices (
+    id           TEXT        PRIMARY KEY,
+    user_id      TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider     TEXT        NOT NULL DEFAULT 'stripe',
+    amount_cents INTEGER     NOT NULL DEFAULT 0,
+    currency     TEXT        NOT NULL DEFAULT 'usd',
+    status       TEXT        NOT NULL DEFAULT 'paid',
+    description  TEXT        NOT NULL DEFAULT '',
+    invoice_url  TEXT        NOT NULL DEFAULT '',
+    invoice_pdf  TEXT        NOT NULL DEFAULT '',
+    period_start TIMESTAMPTZ,
+    period_end   TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
+
+  -- ── Portal designer settings (one row per portal type per org) ────────────────
+  CREATE TABLE IF NOT EXISTS portal_settings (
+    id          TEXT    PRIMARY KEY,                          -- org_id + ':' + portal_type
+    org_id      TEXT    NOT NULL DEFAULT 'admin-1',
+    portal_type TEXT    NOT NULL DEFAULT 'volunteer',        -- 'volunteer' | 'member' | 'employee'
+    theme_id    TEXT    NOT NULL DEFAULT 'default',
+    custom_html TEXT    NOT NULL DEFAULT '',
+    use_custom  BOOLEAN NOT NULL DEFAULT false,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_portal_settings_org ON portal_settings(org_id);
+
+  -- ── Volunteers ────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS volunteers (
-    id                TEXT PRIMARY KEY,
-    first_name        TEXT NOT NULL,
-    last_name         TEXT NOT NULL,
-    email             TEXT NOT NULL,
-    phone             TEXT NOT NULL DEFAULT '',
-    location          TEXT NOT NULL DEFAULT '',
-    join_date         TEXT NOT NULL DEFAULT '',
-    avatar            TEXT NOT NULL DEFAULT '',
-    skills            JSONB NOT NULL DEFAULT '[]',
-    hours_contributed INTEGER NOT NULL DEFAULT 0,
-    status            TEXT NOT NULL DEFAULT 'PENDING',
+    id                TEXT        PRIMARY KEY,
+    org_id            TEXT        NOT NULL DEFAULT 'admin-1',
+    first_name        TEXT        NOT NULL,
+    last_name         TEXT        NOT NULL,
+    email             TEXT        NOT NULL,
+    phone             TEXT        NOT NULL DEFAULT '',
+    location          TEXT        NOT NULL DEFAULT '',
+    join_date         TEXT        NOT NULL DEFAULT '',
+    avatar            TEXT        NOT NULL DEFAULT '',
+    skills            JSONB       NOT NULL DEFAULT '[]',
+    hours_contributed INTEGER     NOT NULL DEFAULT 0,
+    status            TEXT        NOT NULL DEFAULT 'PENDING',
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_volunteers_org_id ON volunteers(org_id);
+
+  -- ── Events ────────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS events (
     id                    TEXT PRIMARY KEY,
+    org_id                TEXT NOT NULL DEFAULT 'admin-1',
     title                 TEXT NOT NULL,
     description           TEXT NOT NULL DEFAULT '',
     category              TEXT NOT NULL,
@@ -69,358 +177,363 @@ const SCHEMA_SQL = `
     updated_at            TEXT NOT NULL
   );
 
+  CREATE INDEX IF NOT EXISTS idx_events_org_id ON events(org_id);
+
+  -- ── Applications (volunteer ↔ event) ─────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS applications (
-    id            TEXT PRIMARY KEY,
-    volunteer_id  TEXT NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
-    event_id      TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    message       TEXT NOT NULL DEFAULT '',
-    status        TEXT NOT NULL DEFAULT 'PENDING',
-    vetting_stage TEXT NOT NULL DEFAULT 'applied',
+    id            TEXT        PRIMARY KEY,
+    org_id        TEXT        NOT NULL DEFAULT 'admin-1',
+    volunteer_id  TEXT        NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
+    event_id      TEXT        NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    message       TEXT        NOT NULL DEFAULT '',
+    status        TEXT        NOT NULL DEFAULT 'PENDING',
+    vetting_stage TEXT        NOT NULL DEFAULT 'applied',
     rating        INTEGER,
-    flagged       BOOLEAN NOT NULL DEFAULT false,
-    notes         JSONB NOT NULL DEFAULT '[]',
+    flagged       BOOLEAN     NOT NULL DEFAULT false,
+    notes         JSONB       NOT NULL DEFAULT '[]',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_applications_org_id ON applications(org_id);
+
+  -- ── File storage ──────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS folders (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    color      TEXT NOT NULL DEFAULT '#6366f1',
+    id         TEXT        PRIMARY KEY,
+    org_id     TEXT        NOT NULL DEFAULT 'admin-1',
+    name       TEXT        NOT NULL,
+    color      TEXT        NOT NULL DEFAULT '#6366f1',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_folders_org_id ON folders(org_id);
+
   CREATE TABLE IF NOT EXISTS files (
-    id           TEXT PRIMARY KEY,
-    name         TEXT NOT NULL,
-    type         TEXT NOT NULL DEFAULT 'other',
-    size         TEXT NOT NULL DEFAULT '',
-    folder_id    TEXT REFERENCES folders(id) ON DELETE SET NULL,
-    url          TEXT NOT NULL DEFAULT '',
-    storage_path TEXT NOT NULL DEFAULT '',
-    uploaded_by  TEXT NOT NULL DEFAULT '',
+    id           TEXT        PRIMARY KEY,
+    org_id       TEXT        NOT NULL DEFAULT 'admin-1',
+    name         TEXT        NOT NULL,
+    type         TEXT        NOT NULL DEFAULT 'other',
+    size         TEXT        NOT NULL DEFAULT '',
+    folder_id    TEXT        REFERENCES folders(id) ON DELETE SET NULL,
+    url          TEXT        NOT NULL DEFAULT '',
+    storage_path TEXT        NOT NULL DEFAULT '',
+    uploaded_by  TEXT        NOT NULL DEFAULT '',
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  ALTER TABLE files ADD COLUMN IF NOT EXISTS storage_path TEXT NOT NULL DEFAULT '';
+  CREATE INDEX IF NOT EXISTS idx_files_org_id ON files(org_id);
 
-  -- Migrate existing applications rows (no-op if columns already exist)
-  ALTER TABLE applications ADD COLUMN IF NOT EXISTS vetting_stage TEXT NOT NULL DEFAULT 'applied';
-  ALTER TABLE applications ADD COLUMN IF NOT EXISTS rating INTEGER;
-  ALTER TABLE applications ADD COLUMN IF NOT EXISTS flagged BOOLEAN NOT NULL DEFAULT false;
-  ALTER TABLE applications ADD COLUMN IF NOT EXISTS notes JSONB NOT NULL DEFAULT '[]';
-
+  -- ── Training ──────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS training_courses (
-    id                TEXT PRIMARY KEY,
-    title             TEXT NOT NULL,
-    description       TEXT NOT NULL DEFAULT '',
-    category          TEXT NOT NULL DEFAULT 'Other',
-    color             TEXT NOT NULL DEFAULT '#2563eb',
-    estimated_minutes INTEGER NOT NULL DEFAULT 30,
-    sections          JSONB NOT NULL DEFAULT '[]',
-    published         BOOLEAN NOT NULL DEFAULT false,
+    id                TEXT        PRIMARY KEY,
+    org_id            TEXT        NOT NULL DEFAULT 'admin-1',
+    title             TEXT        NOT NULL,
+    description       TEXT        NOT NULL DEFAULT '',
+    category          TEXT        NOT NULL DEFAULT 'Other',
+    color             TEXT        NOT NULL DEFAULT '#2563eb',
+    estimated_minutes INTEGER     NOT NULL DEFAULT 30,
+    sections          JSONB       NOT NULL DEFAULT '[]',
+    published         BOOLEAN     NOT NULL DEFAULT false,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_training_courses_org ON training_courses(org_id);
+
   CREATE TABLE IF NOT EXISTS training_modules (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    color       TEXT NOT NULL DEFAULT '#2563eb',
-    course_ids  JSONB NOT NULL DEFAULT '[]',
+    id          TEXT        PRIMARY KEY,
+    org_id      TEXT        NOT NULL DEFAULT 'admin-1',
+    name        TEXT        NOT NULL,
+    description TEXT        NOT NULL DEFAULT '',
+    color       TEXT        NOT NULL DEFAULT '#2563eb',
+    course_ids  JSONB       NOT NULL DEFAULT '[]',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
   CREATE TABLE IF NOT EXISTS training_completions (
-    id              TEXT PRIMARY KEY,
-    course_id       TEXT NOT NULL REFERENCES training_courses(id) ON DELETE CASCADE,
-    volunteer_id    TEXT NOT NULL,
-    volunteer_name  TEXT NOT NULL DEFAULT '',
-    completed_at    TEXT NOT NULL,
-    submitted_files JSONB NOT NULL DEFAULT '[]',
-    notes           TEXT NOT NULL DEFAULT '',
+    id              TEXT        PRIMARY KEY,
+    org_id          TEXT        NOT NULL DEFAULT 'admin-1',
+    course_id       TEXT        NOT NULL REFERENCES training_courses(id) ON DELETE CASCADE,
+    volunteer_id    TEXT        NOT NULL,
+    volunteer_name  TEXT        NOT NULL DEFAULT '',
+    completed_at    TEXT        NOT NULL,
+    submitted_files JSONB       NOT NULL DEFAULT '[]',
+    notes           TEXT        NOT NULL DEFAULT '',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
   CREATE TABLE IF NOT EXISTS training_assignments (
-    id          TEXT PRIMARY KEY,
-    course_id   TEXT NOT NULL REFERENCES training_courses(id) ON DELETE CASCADE,
-    person_id   TEXT NOT NULL,
-    person_name TEXT NOT NULL DEFAULT '',
-    person_type TEXT NOT NULL DEFAULT 'volunteer',
+    id          TEXT        PRIMARY KEY,
+    org_id      TEXT        NOT NULL DEFAULT 'admin-1',
+    course_id   TEXT        NOT NULL REFERENCES training_courses(id) ON DELETE CASCADE,
+    person_id   TEXT        NOT NULL,
+    person_name TEXT        NOT NULL DEFAULT '',
+    person_type TEXT        NOT NULL DEFAULT 'volunteer',
     assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     due_date    TEXT,
     UNIQUE(course_id, person_id, person_type)
   );
 
+  CREATE TABLE IF NOT EXISTS training_section_progress (
+    id           TEXT        PRIMARY KEY,
+    org_id       TEXT        NOT NULL DEFAULT 'admin-1',
+    course_id    TEXT        NOT NULL REFERENCES training_courses(id) ON DELETE CASCADE,
+    volunteer_id TEXT        NOT NULL,
+    section_id   TEXT        NOT NULL,
+    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(course_id, volunteer_id, section_id)
+  );
+
+  -- ── People ────────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS members (
-    id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    email           TEXT NOT NULL DEFAULT '',
-    phone           TEXT NOT NULL DEFAULT '',
-    membership_type TEXT NOT NULL DEFAULT 'standard',
-    status          TEXT NOT NULL DEFAULT 'active',
+    id              TEXT        PRIMARY KEY,
+    org_id          TEXT        NOT NULL DEFAULT 'admin-1',
+    name            TEXT        NOT NULL,
+    email           TEXT        NOT NULL DEFAULT '',
+    phone           TEXT        NOT NULL DEFAULT '',
+    membership_type TEXT        NOT NULL DEFAULT 'standard',
+    status          TEXT        NOT NULL DEFAULT 'active',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_members_org_id ON members(org_id);
+
   CREATE TABLE IF NOT EXISTS employees (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    email      TEXT NOT NULL DEFAULT '',
-    phone      TEXT NOT NULL DEFAULT '',
-    department TEXT NOT NULL DEFAULT '',
-    title      TEXT NOT NULL DEFAULT '',
-    status     TEXT NOT NULL DEFAULT 'active',
+    id         TEXT        PRIMARY KEY,
+    org_id     TEXT        NOT NULL DEFAULT 'admin-1',
+    name       TEXT        NOT NULL,
+    email      TEXT        NOT NULL DEFAULT '',
+    phone      TEXT        NOT NULL DEFAULT '',
+    department TEXT        NOT NULL DEFAULT '',
+    title      TEXT        NOT NULL DEFAULT '',
+    status     TEXT        NOT NULL DEFAULT 'active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- Safe migrations for training_assignments (old installs had volunteer_id / UNIQUE(course_id, volunteer_id))
-  ALTER TABLE training_assignments ADD COLUMN IF NOT EXISTS person_id   TEXT NOT NULL DEFAULT '';
-  ALTER TABLE training_assignments ADD COLUMN IF NOT EXISTS person_name TEXT NOT NULL DEFAULT '';
-  ALTER TABLE training_assignments ADD COLUMN IF NOT EXISTS person_type TEXT NOT NULL DEFAULT 'volunteer';
+  CREATE INDEX IF NOT EXISTS idx_employees_org_id ON employees(org_id);
 
   CREATE TABLE IF NOT EXISTS people_groups (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    slug       TEXT NOT NULL DEFAULT '',
-    color      TEXT NOT NULL DEFAULT '#6366f1',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                      TEXT        PRIMARY KEY,
+    org_id                  TEXT        NOT NULL DEFAULT 'admin-1',
+    name                    TEXT        NOT NULL,
+    slug                    TEXT        NOT NULL DEFAULT '',
+    color                   TEXT        NOT NULL DEFAULT '#6366f1',
+    application_template_id TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_people_groups_org_id ON people_groups(org_id);
+
   CREATE TABLE IF NOT EXISTS group_members (
-    id        TEXT PRIMARY KEY,
-    group_id  TEXT NOT NULL REFERENCES people_groups(id) ON DELETE CASCADE,
-    name      TEXT NOT NULL,
-    email     TEXT NOT NULL DEFAULT '',
-    phone     TEXT NOT NULL DEFAULT '',
-    status    TEXT NOT NULL DEFAULT 'active',
-    notes     TEXT NOT NULL DEFAULT '',
+    id        TEXT        PRIMARY KEY,
+    org_id    TEXT        NOT NULL DEFAULT 'admin-1',
+    group_id  TEXT        NOT NULL REFERENCES people_groups(id) ON DELETE CASCADE,
+    name      TEXT        NOT NULL,
+    email     TEXT        NOT NULL DEFAULT '',
+    phone     TEXT        NOT NULL DEFAULT '',
+    status    TEXT        NOT NULL DEFAULT 'active',
+    notes     TEXT        NOT NULL DEFAULT '',
     joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- Safe migration: add slug if old installs lack it
-  ALTER TABLE people_groups ADD COLUMN IF NOT EXISTS slug TEXT NOT NULL DEFAULT '';
+  -- ── Application templates & submissions ───────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS application_templates (
+    id          TEXT        PRIMARY KEY,
+    org_id      TEXT        NOT NULL DEFAULT 'admin-1',
+    name        TEXT        NOT NULL,
+    description TEXT        NOT NULL DEFAULT '',
+    questions   JSONB       NOT NULL DEFAULT '[]',
+    status      TEXT        NOT NULL DEFAULT 'active',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
 
+  CREATE INDEX IF NOT EXISTS idx_app_templates_org_id ON application_templates(org_id);
+
+  CREATE TABLE IF NOT EXISTS form_submissions (
+    id             TEXT        PRIMARY KEY,
+    org_id         TEXT        NOT NULL DEFAULT 'admin-1',
+    template_id    TEXT        REFERENCES application_templates(id) ON DELETE SET NULL,
+    template_name  TEXT        NOT NULL DEFAULT '',
+    applicant_type TEXT        NOT NULL DEFAULT 'volunteer',
+    name           TEXT        NOT NULL DEFAULT '',
+    email          TEXT        NOT NULL DEFAULT '',
+    phone          TEXT        NOT NULL DEFAULT '',
+    answers        JSONB       NOT NULL DEFAULT '{}',
+    status         TEXT        NOT NULL DEFAULT 'PENDING',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_form_submissions_org ON form_submissions(org_id);
+
+  -- ── QR codes ──────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS qr_campaigns (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    color       TEXT NOT NULL DEFAULT '#3b82f6',
-    status      TEXT NOT NULL DEFAULT 'active',
+    id          TEXT        PRIMARY KEY,
+    org_id      TEXT        NOT NULL DEFAULT 'admin-1',
+    name        TEXT        NOT NULL,
+    description TEXT        NOT NULL DEFAULT '',
+    color       TEXT        NOT NULL DEFAULT '#3b82f6',
+    status      TEXT        NOT NULL DEFAULT 'active',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_qr_campaigns_org_id ON qr_campaigns(org_id);
+
   CREATE TABLE IF NOT EXISTS qr_codes (
-    id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    type            TEXT NOT NULL DEFAULT 'URL',
-    content         TEXT NOT NULL DEFAULT '',
-    display_value   TEXT NOT NULL DEFAULT '',
-    fg_color        TEXT NOT NULL DEFAULT '#1e3a5f',
-    bg_color        TEXT NOT NULL DEFAULT '#ffffff',
-    style           TEXT NOT NULL DEFAULT 'rounded',
-    size            INTEGER NOT NULL DEFAULT 256,
-    include_margin  BOOLEAN NOT NULL DEFAULT true,
-    status          TEXT NOT NULL DEFAULT 'active',
-    campaign_id     TEXT REFERENCES qr_campaigns(id) ON DELETE SET NULL,
-    total_scans     INTEGER NOT NULL DEFAULT 0,
+    id              TEXT        PRIMARY KEY,
+    org_id          TEXT        NOT NULL DEFAULT 'admin-1',
+    name            TEXT        NOT NULL,
+    type            TEXT        NOT NULL DEFAULT 'URL',
+    content         TEXT        NOT NULL DEFAULT '',
+    display_value   TEXT        NOT NULL DEFAULT '',
+    fg_color        TEXT        NOT NULL DEFAULT '#1e3a5f',
+    bg_color        TEXT        NOT NULL DEFAULT '#ffffff',
+    style           TEXT        NOT NULL DEFAULT 'rounded',
+    size            INTEGER     NOT NULL DEFAULT 256,
+    include_margin  BOOLEAN     NOT NULL DEFAULT true,
+    status          TEXT        NOT NULL DEFAULT 'active',
+    campaign_id     TEXT        REFERENCES qr_campaigns(id) ON DELETE SET NULL,
+    total_scans     INTEGER     NOT NULL DEFAULT 0,
     last_scanned_at TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE INDEX IF NOT EXISTS idx_qr_codes_org_id ON qr_codes(org_id);
+
   CREATE TABLE IF NOT EXISTS qr_scans (
-    id          TEXT PRIMARY KEY,
-    qr_id       TEXT NOT NULL REFERENCES qr_codes(id) ON DELETE CASCADE,
+    id          TEXT        PRIMARY KEY,
+    qr_id       TEXT        NOT NULL REFERENCES qr_codes(id) ON DELETE CASCADE,
     scanned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    ip_hash     TEXT NOT NULL DEFAULT '',
-    user_agent  TEXT NOT NULL DEFAULT '',
-    device_type TEXT NOT NULL DEFAULT 'unknown',
-    referrer    TEXT NOT NULL DEFAULT ''
+    ip_hash     TEXT        NOT NULL DEFAULT '',
+    user_agent  TEXT        NOT NULL DEFAULT '',
+    device_type TEXT        NOT NULL DEFAULT 'unknown',
+    referrer    TEXT        NOT NULL DEFAULT ''
   );
 
   CREATE INDEX IF NOT EXISTS idx_qr_scans_qr_id      ON qr_scans(qr_id);
   CREATE INDEX IF NOT EXISTS idx_qr_scans_scanned_at ON qr_scans(scanned_at);
 
+  -- ── Messaging ─────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS message_templates (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    channel    TEXT NOT NULL DEFAULT 'email',
-    subject    TEXT NOT NULL DEFAULT '',
-    body       TEXT NOT NULL DEFAULT '',
+    id         TEXT        PRIMARY KEY,
+    org_id     TEXT        NOT NULL DEFAULT 'admin-1',
+    name       TEXT        NOT NULL,
+    channel    TEXT        NOT NULL DEFAULT 'email',
+    subject    TEXT        NOT NULL DEFAULT '',
+    body       TEXT        NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
   CREATE TABLE IF NOT EXISTS auto_reminders (
-    id            TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,
-    channel       TEXT NOT NULL DEFAULT 'email',
-    trigger_hours NUMERIC NOT NULL DEFAULT 24,
-    template_id   TEXT REFERENCES message_templates(id) ON DELETE SET NULL,
-    custom_body   TEXT NOT NULL DEFAULT '',
-    enabled       BOOLEAN NOT NULL DEFAULT true,
-    event_scope   TEXT NOT NULL DEFAULT 'all',
+    id            TEXT        PRIMARY KEY,
+    org_id        TEXT        NOT NULL DEFAULT 'admin-1',
+    name          TEXT        NOT NULL,
+    channel       TEXT        NOT NULL DEFAULT 'email',
+    trigger_hours NUMERIC     NOT NULL DEFAULT 24,
+    template_id   TEXT        REFERENCES message_templates(id) ON DELETE SET NULL,
+    custom_body   TEXT        NOT NULL DEFAULT '',
+    enabled       BOOLEAN     NOT NULL DEFAULT true,
+    event_scope   TEXT        NOT NULL DEFAULT 'all',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
   CREATE TABLE IF NOT EXISTS sent_messages (
-    id         TEXT PRIMARY KEY,
-    channel    TEXT NOT NULL,
-    subject    TEXT NOT NULL DEFAULT '',
-    body       TEXT NOT NULL DEFAULT '',
-    recipients INTEGER NOT NULL DEFAULT 0,
+    id         TEXT        PRIMARY KEY,
+    org_id     TEXT        NOT NULL DEFAULT 'admin-1',
+    channel    TEXT        NOT NULL,
+    subject    TEXT        NOT NULL DEFAULT '',
+    body       TEXT        NOT NULL DEFAULT '',
+    recipients INTEGER     NOT NULL DEFAULT 0,
     sent_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    status     TEXT NOT NULL DEFAULT 'delivered'
+    status     TEXT        NOT NULL DEFAULT 'delivered'
   );
 
-  CREATE TABLE IF NOT EXISTS login_notifications (
-    id         TEXT PRIMARY KEY,
-    title      TEXT NOT NULL,
-    message    TEXT NOT NULL DEFAULT '',
-    type       TEXT NOT NULL DEFAULT 'info',
-    active     BOOLEAN NOT NULL DEFAULT true,
-    seen_by    JSONB NOT NULL DEFAULT '[]',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-
-  CREATE TABLE IF NOT EXISTS job_notif_rules (
-    id                TEXT PRIMARY KEY,
-    event             TEXT NOT NULL UNIQUE,
-    label             TEXT NOT NULL,
-    description       TEXT NOT NULL DEFAULT '',
-    grp               TEXT NOT NULL DEFAULT '',
-    volunteer_channel TEXT NOT NULL DEFAULT 'email',
-    leader_channel    TEXT NOT NULL DEFAULT 'none',
-    admin_channel     TEXT NOT NULL DEFAULT 'none'
-  );
-
-  -- Tracks which (reminder, event) pairs have already been dispatched
-  -- to prevent duplicate auto-reminder delivery on server restart.
   CREATE TABLE IF NOT EXISTS sent_auto_reminders (
-    reminder_id TEXT NOT NULL,
-    event_id    TEXT NOT NULL,
+    reminder_id TEXT        NOT NULL,
+    event_id    TEXT        NOT NULL,
     sent_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (reminder_id, event_id)
   );
 
-  -- Per-portal-type designer settings (theme + custom HTML).
-  CREATE TABLE IF NOT EXISTS portal_settings (
-    portal_type TEXT PRIMARY KEY,           -- 'volunteer' | 'member' | 'employee'
-    theme_id    TEXT NOT NULL DEFAULT 'default',
-    custom_html TEXT NOT NULL DEFAULT '',
-    use_custom  BOOLEAN NOT NULL DEFAULT false,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  -- ── Notifications & audit ─────────────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS login_notifications (
+    id         TEXT        PRIMARY KEY,
+    org_id     TEXT        NOT NULL DEFAULT 'admin-1',
+    title      TEXT        NOT NULL,
+    message    TEXT        NOT NULL DEFAULT '',
+    type       TEXT        NOT NULL DEFAULT 'info',
+    active     BOOLEAN     NOT NULL DEFAULT true,
+    seen_by    JSONB       NOT NULL DEFAULT '[]',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
-  -- Single-row table that stores organisation-level settings.
-  -- id is always 'default'; use ON CONFLICT DO NOTHING to seed it.
-  CREATE TABLE IF NOT EXISTS org_settings (
-    id                 TEXT PRIMARY KEY DEFAULT 'default',
-    email_from_name    TEXT NOT NULL DEFAULT '',
-    email_from_address TEXT NOT NULL DEFAULT '',
-    sms_from_name      TEXT NOT NULL DEFAULT '',
-    org_name           TEXT NOT NULL DEFAULT '',
-    website            TEXT NOT NULL DEFAULT '',
-    org_email          TEXT NOT NULL DEFAULT '',
-    phone              TEXT NOT NULL DEFAULT '',
-    address            TEXT NOT NULL DEFAULT '',
-    timezone           TEXT NOT NULL DEFAULT 'America/New_York',
-    language           TEXT NOT NULL DEFAULT 'English (US)',
-    description        TEXT NOT NULL DEFAULT '',
-    tax_id             TEXT NOT NULL DEFAULT '',
-    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  CREATE TABLE IF NOT EXISTS job_notif_rules (
+    id                TEXT    PRIMARY KEY,
+    org_id            TEXT    NOT NULL DEFAULT 'admin-1',
+    event             TEXT    NOT NULL,
+    label             TEXT    NOT NULL,
+    description       TEXT    NOT NULL DEFAULT '',
+    grp               TEXT    NOT NULL DEFAULT '',
+    volunteer_channel TEXT    NOT NULL DEFAULT 'email',
+    leader_channel    TEXT    NOT NULL DEFAULT 'none',
+    admin_channel     TEXT    NOT NULL DEFAULT 'none',
+    UNIQUE(org_id, event)
   );
-
-  -- Safe migration for existing installs
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS org_name    TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS website     TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS org_email   TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS phone       TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS address     TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS timezone    TEXT NOT NULL DEFAULT 'America/New_York';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS language    TEXT NOT NULL DEFAULT 'English (US)';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS tax_id      TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS logo_url    TEXT NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS notif_prefs        JSONB    NOT NULL DEFAULT '{}';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS portal_name        TEXT     NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS portal_subdomain   TEXT     NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS brand_primary      TEXT     NOT NULL DEFAULT '#10b981';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS brand_accent       TEXT     NOT NULL DEFAULT '#0d9488';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS welcome_heading    TEXT     NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS welcome_subtext    TEXT     NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS footer_text        TEXT     NOT NULL DEFAULT '';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS show_powered_by    BOOLEAN  NOT NULL DEFAULT TRUE;
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS logo_base64        TEXT     NOT NULL DEFAULT '';
 
   CREATE TABLE IF NOT EXISTS audit_logs (
-    id          TEXT PRIMARY KEY,
-    timestamp   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    user_id     TEXT NOT NULL DEFAULT '',
-    user_name   TEXT NOT NULL DEFAULT 'System',
-    user_role   TEXT NOT NULL DEFAULT 'system',
-    category    TEXT NOT NULL DEFAULT '',
-    verb        TEXT NOT NULL DEFAULT '',
-    resource    TEXT NOT NULL DEFAULT '',
-    detail      TEXT NOT NULL DEFAULT '',
-    ip          TEXT NOT NULL DEFAULT ''
+    id        TEXT        PRIMARY KEY,
+    org_id    TEXT        NOT NULL DEFAULT 'admin-1',
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_id   TEXT        NOT NULL DEFAULT '',
+    user_name TEXT        NOT NULL DEFAULT 'System',
+    user_role TEXT        NOT NULL DEFAULT 'system',
+    category  TEXT        NOT NULL DEFAULT '',
+    verb      TEXT        NOT NULL DEFAULT '',
+    resource  TEXT        NOT NULL DEFAULT '',
+    detail    TEXT        NOT NULL DEFAULT '',
+    ip        TEXT        NOT NULL DEFAULT ''
   );
 
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_org_id    ON audit_logs(org_id);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_category  ON audit_logs(category);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_user_name ON audit_logs(user_name);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_verb      ON audit_logs(verb);
 
-  CREATE TABLE IF NOT EXISTS org_roles (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    color       TEXT NOT NULL DEFAULT 'bg-gray-500',
-    permissions JSONB NOT NULL DEFAULT '{}',
-    is_system   BOOLEAN NOT NULL DEFAULT FALSE,
-    sort_order  INTEGER NOT NULL DEFAULT 0
+  -- ── Backward-compat migrations (no-ops on fresh installs) ────────────────────
+  ALTER TABLE users            ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE portal_settings  ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT 'admin-1';
+  ALTER TABLE job_notif_rules  ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT 'admin-1';
+
+  -- Performance indexes for org scoping
+  CREATE INDEX IF NOT EXISTS idx_volunteers_org_id   ON volunteers(org_id);
+  CREATE INDEX IF NOT EXISTS idx_events_org_id        ON events(org_id);
+  CREATE INDEX IF NOT EXISTS idx_applications_org_id  ON applications(org_id);
+  CREATE INDEX IF NOT EXISTS idx_employees_org_id     ON employees(org_id);
+  CREATE INDEX IF NOT EXISTS idx_members_org_id       ON members(org_id);
+  CREATE INDEX IF NOT EXISTS idx_people_groups_org_id ON people_groups(org_id);
+  CREATE INDEX IF NOT EXISTS idx_app_templates_org_id ON application_templates(org_id);
+  CREATE INDEX IF NOT EXISTS idx_training_courses_org ON training_courses(org_id);
+  CREATE INDEX IF NOT EXISTS idx_form_submissions_org ON form_submissions(org_id);
+  CREATE INDEX IF NOT EXISTS idx_folders_org_id       ON folders(org_id);
+  CREATE INDEX IF NOT EXISTS idx_files_org_id         ON files(org_id);
+  CREATE INDEX IF NOT EXISTS idx_qr_campaigns_org_id  ON qr_campaigns(org_id);
+  CREATE INDEX IF NOT EXISTS idx_qr_codes_org_id      ON qr_codes(org_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_org_id    ON audit_logs(org_id);
+
+  CREATE TABLE IF NOT EXISTS help_content (
+    id         SERIAL       PRIMARY KEY,
+    type       VARCHAR(20)  NOT NULL CHECK (type IN ('faq', 'article')),
+    title      TEXT         NOT NULL,
+    body       TEXT         NOT NULL DEFAULT '',
+    category   TEXT,
+    sort_order INTEGER      NOT NULL DEFAULT 0,
+    published  BOOLEAN      NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
   );
 
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS plan             TEXT        NOT NULL DEFAULT 'discover';
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_cycle    TEXT        NOT NULL DEFAULT 'monthly';
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW();
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret  TEXT;
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS session_timeout    TEXT    NOT NULL DEFAULT '8';
-
-  CREATE TABLE IF NOT EXISTS user_sessions (
-    id          TEXT        PRIMARY KEY,
-    user_id     TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    user_agent  TEXT        NOT NULL DEFAULT '',
-    ip_address  TEXT        NOT NULL DEFAULT '',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-
-  -- Payment / subscription columns (safe migrations)
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id     TEXT;
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS paypal_subscription_id TEXT;
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_provider       TEXT;
-  ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status    TEXT;
-
-  CREATE TABLE IF NOT EXISTS invoices (
-    id           TEXT        PRIMARY KEY,
-    user_id      TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider     TEXT        NOT NULL DEFAULT 'stripe',
-    amount_cents INTEGER     NOT NULL DEFAULT 0,
-    currency     TEXT        NOT NULL DEFAULT 'usd',
-    status       TEXT        NOT NULL DEFAULT 'paid',
-    description  TEXT        NOT NULL DEFAULT '',
-    invoice_url  TEXT        NOT NULL DEFAULT '',
-    invoice_pdf  TEXT        NOT NULL DEFAULT '',
-    period_start TIMESTAMPTZ,
-    period_end   TIMESTAMPTZ,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
-
-  -- Data retention settings (safe migrations on org_settings)
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS retention_volunteers   TEXT NOT NULL DEFAULT '12';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS retention_events       TEXT NOT NULL DEFAULT '36';
-  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS retention_applications TEXT NOT NULL DEFAULT '24';
+  CREATE INDEX IF NOT EXISTS idx_help_content_type      ON help_content(type);
+  CREATE INDEX IF NOT EXISTS idx_help_content_published ON help_content(published);
+  CREATE INDEX IF NOT EXISTS idx_help_content_order     ON help_content(type, sort_order);
 `;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -465,9 +578,9 @@ const JOB_NOTIF_RULES_SEED = [
 async function seedJobNotifRules(client) {
   for (const r of JOB_NOTIF_RULES_SEED) {
     await client.query(
-      `INSERT INTO job_notif_rules (id, event, label, description, grp, volunteer_channel, leader_channel, admin_channel)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (event) DO NOTHING`,
-      [`jnr_${r.event}`, r.event, r.label, r.description, r.grp, r.volunteerChannel, r.leaderChannel, r.adminChannel]
+      `INSERT INTO job_notif_rules (id, org_id, event, label, description, grp, volunteer_channel, leader_channel, admin_channel)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (org_id, event) DO NOTHING`,
+      [`jnr_${r.event}`, 'admin-1', r.event, r.label, r.description, r.grp, r.volunteerChannel, r.leaderChannel, r.adminChannel]
     );
   }
 }
@@ -709,16 +822,18 @@ async function initDb() {
   const client = await pool.connect();
   try {
     await client.query(SCHEMA_SQL);
-    // Seed default portal_settings rows for all 3 portal types
+    // Backfill org_id for existing users (no-op for users already set)
+    await client.query(`UPDATE users SET org_id = id WHERE org_id = ''`);
+    // Seed default portal_settings rows for the default org
     for (const type of ['volunteer', 'member', 'employee']) {
       await client.query(
-        "INSERT INTO portal_settings (portal_type) VALUES ($1) ON CONFLICT (portal_type) DO NOTHING",
-        [type]
+        "INSERT INTO portal_settings (id, org_id, portal_type) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+        [`admin-1:${type}`, 'admin-1', type]
       );
     }
-    // Ensure the single-row org_settings record exists
+    // Ensure the single-row org_settings record exists (id = owner's user id)
     await client.query(
-      "INSERT INTO org_settings (id) VALUES ('default') ON CONFLICT (id) DO NOTHING"
+      "INSERT INTO org_settings (id) VALUES ('admin-1') ON CONFLICT (id) DO NOTHING"
     );
     const { rows } = await client.query('SELECT COUNT(*) FROM volunteers');
     if (parseInt(rows[0].count, 10) === 0) {
