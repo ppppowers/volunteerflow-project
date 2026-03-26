@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
+import { PlanGate } from '@/components/PlanGate';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import {
@@ -335,6 +336,7 @@ export default function HoursPage() {
   return (
     <Layout>
       <Head><title>Hours — VolunteerFlow</title></Head>
+      <PlanGate feature="hours_tracking">
       <div className="p-6 max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
@@ -522,6 +524,7 @@ export default function HoursPage() {
           </div>
         </div>
       </div>
+      </PlanGate>
 
       {showModal && (
         <LogModal

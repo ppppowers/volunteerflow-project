@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
+import { PlanGate } from '@/components/PlanGate';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import {
@@ -483,6 +484,7 @@ export default function ImportPage() {
   return (
     <Layout>
       <Head><title>Import — VolunteerFlow</title></Head>
+      <PlanGate feature="data_import">
       <div className="p-6 max-w-5xl mx-auto">
         {/* Header */}
         <div className="mb-8">
@@ -537,6 +539,7 @@ export default function ImportPage() {
         )}
         {step === 'done' && <DoneStep count={importedCount} onReset={reset} />}
       </div>
+      </PlanGate>
     </Layout>
   );
 }

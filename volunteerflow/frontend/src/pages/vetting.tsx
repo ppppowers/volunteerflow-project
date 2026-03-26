@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
+import { PlanGate } from '@/components/PlanGate';
 import { api } from '@/lib/api';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -358,6 +359,7 @@ export default function VettingPage() {
   return (
     <Layout>
       <Head><title>Vetting — VolunteerFlow</title></Head>
+      <PlanGate feature="applicant_vetting">
       <div className="p-6 max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
@@ -478,6 +480,7 @@ export default function VettingPage() {
           ))}
         </div>
       </div>
+      </PlanGate>
 
       {selected && (
         <DetailPanel
