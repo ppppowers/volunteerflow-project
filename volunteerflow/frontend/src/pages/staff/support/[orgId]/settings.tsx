@@ -22,7 +22,7 @@ export default function SupportSettingsPage() {
     staffApi.get(`/orgs/${orgId}/settings`)
       .then(data => {
         const d = data as { settings?: SettingsMap } | SettingsMap;
-        setSettings(('settings' in d && d.settings) ? d.settings : d as SettingsMap);
+        setSettings((('settings' in d && d.settings) ? d.settings : d) as SettingsMap);
       })
       .catch(() => setError('Failed to load settings.'))
       .finally(() => setLoading(false));

@@ -943,12 +943,12 @@ function SecurityTab() {
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get('/auth/security-settings').then((d: { twoFactorEnabled: boolean; sessionTimeout: string }) => {
+    api.get<{ twoFactorEnabled: boolean; sessionTimeout: string }>('/auth/security-settings').then((d) => {
       setTwoFactor(d.twoFactorEnabled);
       setSessionTimeout(d.sessionTimeout);
     }).catch(() => {});
 
-    api.get('/auth/sessions').then((d: ActiveSession[]) => {
+    api.get<ActiveSession[]>('/auth/sessions').then((d) => {
       setSessions(d);
     }).catch(() => {}).finally(() => setSessionsLoading(false));
   }, []);
@@ -1492,7 +1492,7 @@ function RolesTab() {
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200 truncate">{r.name}</span>
-                    {r.isSystem && <Shield className="w-3 h-3 text-neutral-400 flex-shrink-0" title="System role" />}
+                    {r.isSystem && <span title="System role"><Shield className="w-3 h-3 text-neutral-400 flex-shrink-0" /></span>}
                   </div>
                   {!r.isSystem && (
                     <button
