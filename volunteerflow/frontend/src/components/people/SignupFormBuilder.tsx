@@ -366,8 +366,8 @@ export function SignupFormBuilder({ type, onClose }: SignupFormBuilderProps) {
 
   const previewUrl =
     typeof window !== 'undefined'
-      ? `${window.location.origin}/apply?type=${type}`
-      : `/apply?type=${type}`;
+      ? `${window.location.origin}/apply?type=${type}&from=admin`
+      : `/apply?type=${type}&from=admin`;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">

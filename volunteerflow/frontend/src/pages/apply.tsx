@@ -268,6 +268,8 @@ export default function ApplyPage() {
         </div>
         <button
           onClick={() => {
+            const from = router.query.from as string | undefined;
+            if (from === 'admin') { window.close(); return; }
             if (window.history.length > 1) router.back();
             else router.push('/volunteerportal');
           }}
