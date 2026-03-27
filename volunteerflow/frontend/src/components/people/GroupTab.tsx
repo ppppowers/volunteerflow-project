@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/router';
 import toast from 'react-hot-toast';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -267,6 +268,7 @@ export function GroupTab({
   onUpdate: (updated: PeopleGroup) => void;
   templates?: TemplateOption[];
 }) {
+  const router = useRouter();
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -459,7 +461,7 @@ export function GroupTab({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((m) => (
             <div key={m.id} className="group relative">
-              <Card className="p-4 flex flex-col gap-3">
+              <Card className="p-4 flex flex-col gap-3 cursor-pointer hover:shadow-md transition-shadow" onClick={() => router.push(`/people/groups/${group.id}/${m.id}`)}>
                 {/* Avatar + name */}
                 <div className="flex items-start gap-3">
                   <div
@@ -479,13 +481,13 @@ export function GroupTab({
                     {pendingDeleteId === m.id ? (
                       <>
                         <button
-                          onClick={() => handleDeleteMember(m.id)}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteMember(m.id); }}
                           className="px-2 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors"
                         >
                           Delete
                         </button>
                         <button
-                          onClick={() => setPendingDeleteId(null)}
+                          onClick={(e) => { e.stopPropagation(); setPendingDeleteId(null); }}
                           className="px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-semibold"
                         >
                           Cancel
@@ -494,14 +496,14 @@ export function GroupTab({
                     ) : (
                       <>
                         <button
-                          onClick={() => { setEditingMember(m); setShowModal(true); }}
+                          onClick={(e) => { e.stopPropagation(); setEditingMember(m); setShowModal(true); }}
                           className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
                           title="Edit"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => handleDeleteMember(m.id)}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteMember(m.id); }}
                           className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-neutral-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                           title="Delete"
                         >

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/router';
 import Card from '@/components/Card';
 import { api } from '@/lib/api';
 import { Search, Briefcase, Mail, Calendar, Shield, ChevronRight, X, Clock } from 'lucide-react';
@@ -220,10 +221,10 @@ function StaffCard({ member, onSelect }: { member: StaffRow; onSelect: () => voi
 // ─── StaffTab ─────────────────────────────────────────────────────────────────
 
 export function StaffTab() {
-  const [staff, setStaff]       = useState<StaffRow[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [search, setSearch]     = useState('');
-  const [selected, setSelected] = useState<StaffRow | null>(null);
+  const router = useRouter();
+  const [staff, setStaff]     = useState<StaffRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch]   = useState('');
 
   useEffect(() => {
     api.get<StaffRow[]>('/team')
@@ -289,14 +290,9 @@ export function StaffTab() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((s) => (
-            <StaffCard key={s.id} member={s} onSelect={() => setSelected(s)} />
+            <StaffCard key={s.id} member={s} onSelect={() => router.push(`/people/staff/${s.id}`)} />
           ))}
         </div>
-      )}
-
-      {/* Profile drawer */}
-      {selected && (
-        <ProfileDrawer member={selected} onClose={() => setSelected(null)} />
       )}
     </div>
   );
