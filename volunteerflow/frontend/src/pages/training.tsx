@@ -1237,7 +1237,7 @@ export default function TrainingPage() {
       api.get<ApiCompletion[]>('/training/completions'),
       api.get<ApiVolunteer[]>('/volunteers?limit=100'),
       api.get<ApiAssignment[]>('/training/assignments'),
-      api.get<ApiGroup[]>('/people/groups'),
+      api.get<ApiGroup[]>('/people/groups').catch(() => [] as ApiGroup[]),
     ]).then(([cs, ms, cmps, vols, asgns, grps]) => {
       setCourses((cs as ApiCourse[]).map(mapCourse));
       setModules(ms as ApiModule[]);
