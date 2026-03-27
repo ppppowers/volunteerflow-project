@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/staff/feedback', label: 'Feedback', icon: '💬' },
   { href: '/staff/employees', label: 'Employees', icon: '👥' },
   { href: '/staff/roles', label: 'Roles', icon: '🔑' },
+  { href: '/staff/help', label: 'Documentation', icon: '📖' },
 ];
 
 export function StaffSidebar() {
