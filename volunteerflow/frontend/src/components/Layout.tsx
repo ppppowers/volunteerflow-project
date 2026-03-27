@@ -25,9 +25,10 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   const { isWarning, secondsLeft, reset } = useIdleTimer({
-    warningMs: isAuthed ? 9 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
-    timeoutMs: isAuthed ? 10 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
+    warningMs: 9 * 60 * 1000,
+    timeoutMs: 10 * 60 * 1000,
     onTimeout: orgLogout,
+    disabled: !isAuthed,
   });
 
   useEffect(() => {

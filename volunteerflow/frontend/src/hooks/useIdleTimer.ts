@@ -4,6 +4,7 @@ interface UseIdleTimerOptions {
   warningMs?: number;
   timeoutMs?: number;
   onTimeout: () => void;
+  disabled?: boolean;
 }
 
 interface UseIdleTimerResult {
@@ -19,6 +20,7 @@ export function useIdleTimer({
   warningMs = DEFAULT_WARNING_MS,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   onTimeout,
+  disabled = false,
 }: UseIdleTimerOptions): UseIdleTimerResult {
   const [isWarning, setIsWarning] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(60);
@@ -77,7 +79,7 @@ export function useIdleTimer({
   }, [startIdleTimer]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || disabled) return;
 
     startIdleTimer();
 
