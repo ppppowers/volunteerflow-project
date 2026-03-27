@@ -114,10 +114,13 @@ async function dispatchBulk(channel, recipients, subject, body, emailFrom) {
   const errors = [];
   for (const r of recipients) {
     try {
+      const name = (r.name || '').trim() || 'Volunteer';
+      const personalSubject = subject.replace(/\[Volunteer Name\]/gi, name);
+      const personalBody    = body.replace(/\[Volunteer Name\]/gi, name);
       if (channel === 'sms') {
-        await sendSms(r.phone, body);
+        await sendSms(r.phone, personalBody);
       } else {
-        await sendEmail(r.email, subject, body, emailFrom);
+        await sendEmail(r.email, personalSubject, personalBody, emailFrom);
       }
       sent++;
     } catch (err) {

@@ -3861,7 +3861,7 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
     let recipientRows = [];
     if (recipientMode === 'event' && eventId) {
       const { rows } = await pool.query(
-        `SELECT v.email, v.phone FROM volunteers v
+        `SELECT v.email, v.phone, v.first_name || ' ' || v.last_name AS name FROM volunteers v
          JOIN applications a ON a.volunteer_id = v.id
          WHERE a.event_id = $1 AND a.status NOT IN ('REJECTED') AND v.org_id = $2`,
         [eventId, req.orgId]
@@ -3869,14 +3869,14 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
       recipientRows = rows;
     } else if (recipientMode === 'select' && Array.isArray(volunteerIds) && volunteerIds.length) {
       const { rows } = await pool.query(
-        'SELECT email, phone FROM volunteers WHERE id = ANY($1) AND org_id = $2',
+        "SELECT email, phone, first_name || ' ' || last_name AS name FROM volunteers WHERE id = ANY($1) AND org_id = $2",
         [volunteerIds, req.orgId]
       );
       recipientRows = rows;
     } else {
       // 'all' — send to all active volunteers in this org
       const { rows } = await pool.query(
-        "SELECT email, phone FROM volunteers WHERE LOWER(status) = 'active' AND org_id = $1",
+        "SELECT email, phone, first_name || ' ' || last_name AS name FROM volunteers WHERE LOWER(status) = 'active' AND org_id = $1",
         [req.orgId]
       );
       recipientRows = rows;
@@ -3885,11 +3885,16 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
     // Resolve custom sender from org settings
     const orgSettings  = await getOrgSettings(req.orgId);
     const emailFrom    = buildFrom(orgSettings);
+    const orgName      = (orgSettings?.org_name || orgSettings?.email_from_name || '').trim() || 'Your Organization';
+
+    // Replace org-level placeholders once (same for all recipients)
+    const subjectTpl = (subject || '').replace(/\[Organization Name\]/gi, orgName);
+    const bodyTpl    = body.replace(/\[Organization Name\]/gi, orgName);
 
     console.log(`[Messages] Sending ${channel || 'email'} to ${recipientRows.length} recipient(s), from="${emailFrom}"`);
 
     // Dispatch messages via Resend / Twilio (or log if not configured)
-    const { sent, failed, errors } = await dispatchBulk(channel || 'email', recipientRows, subject || '', body, emailFrom);
+    const { sent, failed, errors } = await dispatchBulk(channel || 'email', recipientRows, subjectTpl, bodyTpl, emailFrom);
     const finalStatus = failed === 0 ? 'delivered' : sent === 0 ? 'failed' : 'partial';
 
     if (errors.length) console.error('[Messages] Dispatch errors:', errors);
@@ -4143,14 +4148,14 @@ async function processAutoReminders() {
         let vols;
         if (reminder.event_scope === 'specific') {
           ({ rows: vols } = await pool.query(
-            `SELECT v.email, v.phone FROM volunteers v
+            `SELECT v.email, v.phone, v.first_name || ' ' || v.last_name AS name FROM volunteers v
              JOIN applications a ON a.volunteer_id = v.id
              WHERE a.event_id = $1 AND a.status NOT IN ('REJECTED') AND v.org_id = $2`,
             [event.id, reminderOrgId]
           ));
         } else {
           ({ rows: vols } = await pool.query(
-            "SELECT email, phone FROM volunteers WHERE LOWER(status) = 'active' AND org_id = $1",
+            "SELECT email, phone, first_name || ' ' || last_name AS name FROM volunteers WHERE LOWER(status) = 'active' AND org_id = $1",
             [reminderOrgId]
           ));
         }
@@ -4169,6 +4174,8 @@ async function processAutoReminders() {
         msgBody = msgBody.replace(/\{event_title\}/g, event.title);
 
         const orgCfg   = await getOrgSettings(reminder.org_id || 'admin-1');
+        const orgName  = (orgCfg?.org_name || orgCfg?.email_from_name || '').trim() || 'Your Organization';
+        msgBody = msgBody.replace(/\[Organization Name\]/gi, orgName);
         const emailFrom = buildFrom(orgCfg);
         await dispatchBulk(reminder.channel, vols, `Reminder: ${event.title}`, msgBody, emailFrom);
 
