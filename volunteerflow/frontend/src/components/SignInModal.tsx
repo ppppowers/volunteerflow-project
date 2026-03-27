@@ -47,11 +47,12 @@ export function SignInModal({ open, onClose }: Props) {
       });
       const data = await res.json();
       if (res.ok) {
-        localStorage.setItem('vf_token', data.token);
+        const { token, user } = data.data ?? data;
+        localStorage.setItem('vf_token', token);
         localStorage.setItem('vf_user', JSON.stringify({
-          email: data.user.email,
-          name: data.user.fullName,
-          orgName: data.user.orgName ?? '',
+          email: user.email,
+          name: user.fullName,
+          orgName: user.orgName ?? '',
         }));
         onClose();
         router.replace('/');
