@@ -123,6 +123,77 @@ const QUESTION_TYPES: {
   { type: 'toggle', label: 'Yes / No', icon: ToggleLeft, hasOptions: false },
 ];
 
+// ─── Default starter template ────────────────────────────────────────────────
+
+const DEFAULT_APPLICATION_QUESTIONS: Question[] = [
+  {
+    id: 'dq-motivation',
+    type: 'long_text',
+    label: 'Why do you want to volunteer with us?',
+    placeholder: 'Tell us what motivates you and what you hope to contribute…',
+    required: true,
+  },
+  {
+    id: 'dq-experience',
+    type: 'long_text',
+    label: 'Describe any relevant skills or experience',
+    placeholder: 'Include any volunteering, work, or training that applies…',
+    required: false,
+  },
+  {
+    id: 'dq-availability',
+    type: 'checkbox_group',
+    label: 'When are you available?',
+    required: true,
+    options: [
+      { id: 'dq-av-wkday-am',  label: 'Weekday mornings'    },
+      { id: 'dq-av-wkday-pm',  label: 'Weekday afternoons'  },
+      { id: 'dq-av-wkday-eve', label: 'Weekday evenings'    },
+      { id: 'dq-av-wkend-am',  label: 'Weekend mornings'    },
+      { id: 'dq-av-wkend-pm',  label: 'Weekend afternoons'  },
+    ],
+  },
+  {
+    id: 'dq-referral',
+    type: 'dropdown',
+    label: 'How did you hear about us?',
+    required: false,
+    options: [
+      { id: 'dq-ref-friend', label: 'Friend or family'  },
+      { id: 'dq-ref-social', label: 'Social media'      },
+      { id: 'dq-ref-search', label: 'Web search'        },
+      { id: 'dq-ref-event',  label: 'Community event'   },
+      { id: 'dq-ref-other',  label: 'Other'             },
+    ],
+  },
+  {
+    id: 'dq-driver-license',
+    type: 'toggle',
+    label: 'Do you have a valid driver\'s license?',
+    required: false,
+  },
+  {
+    id: 'dq-emergency-name',
+    type: 'short_text',
+    label: 'Emergency contact name',
+    placeholder: 'Full name',
+    required: false,
+  },
+  {
+    id: 'dq-emergency-phone',
+    type: 'short_text',
+    label: 'Emergency contact phone',
+    placeholder: '+1 555-0000',
+    required: false,
+  },
+  {
+    id: 'dq-conduct',
+    type: 'checkbox',
+    label: 'I agree to abide by the volunteer code of conduct',
+    required: true,
+  },
+];
+
 // ─── Mock Data ───────────────────────────────────────────────────────────────
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
@@ -395,6 +466,8 @@ export default function Applications() {
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
   const [usingMockData, setUsingMockData] = useState(false);
 
+  const [creatingDefault, setCreatingDefault] = useState(false);
+
   // Builder state
   const [editingTemplate, setEditingTemplate] = useState<ApplicationTemplate | null>(null);
   const [showQuestionPicker, setShowQuestionPicker] = useState(false);
@@ -479,6 +552,23 @@ export default function Applications() {
       });
     }
     setView('builder');
+  };
+
+  const handleUseDefault = async () => {
+    setCreatingDefault(true);
+    try {
+      const saved = await api.post<ApplicationTemplate>('/application-templates', {
+        name: 'Volunteer Application',
+        description: 'Standard volunteer application form — customize to match your organization\'s needs.',
+        questions: DEFAULT_APPLICATION_QUESTIONS,
+        status: 'active',
+      });
+      setTemplates((prev) => [...prev, saved]);
+    } catch {
+      // fall through — let the user try again
+    } finally {
+      setCreatingDefault(false);
+    }
   };
 
   const saveTemplate = async () => {
@@ -752,14 +842,62 @@ export default function Applications() {
           ))}
         </div>
       ) : templates.length === 0 ? (
-        <Card className="p-12 text-center">
-          <FileQuestion className="w-12 h-12 text-neutral-300 dark:text-neutral-600 mx-auto mb-3" />
-          <p className="text-neutral-600 dark:text-neutral-400 mb-4">No application forms yet</p>
-          <Button onClick={() => openBuilder()}>
-            <Plus className="w-4 h-4 mr-2" />
-            Create your first form
-          </Button>
-        </Card>
+        <div className="space-y-4">
+          {/* Default starter template card */}
+          <div className="rounded-2xl border-2 border-dashed border-primary-300 dark:border-primary-700 bg-primary-50/50 dark:bg-primary-900/10 p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center shrink-0">
+                <ClipboardList className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-1">
+                  Volunteer Application <span className="ml-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-100 dark:bg-primary-900/40 px-2 py-0.5 rounded-full">Recommended</span>
+                </h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-3">
+                  A ready-to-use application form with 8 standard questions — availability, motivation, experience, emergency contact, and code of conduct. Customize after creating.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {['Availability', 'Motivation', 'Experience', 'Referral source', 'Driver\'s license', 'Emergency contact', 'Code of conduct'].map((tag) => (
+                    <span key={tag} className="text-xs px-2 py-0.5 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-full text-neutral-500 dark:text-neutral-400">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <Button
+                  variant="primary"
+                  onClick={handleUseDefault}
+                  disabled={creatingDefault}
+                >
+                  {creatingDefault ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Creating…
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 mr-2" />
+                      Use this template
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Start from scratch */}
+          <div className="text-center py-2">
+            <button
+              type="button"
+              onClick={() => openBuilder()}
+              className="text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 underline underline-offset-2 transition-colors"
+            >
+              Or start from scratch
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           {templates.map((tmpl) => {

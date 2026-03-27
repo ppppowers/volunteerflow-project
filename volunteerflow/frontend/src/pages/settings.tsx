@@ -1959,6 +1959,141 @@ interface Invoice {
 
 const PAYPAL_CLIENT_ID = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
 
+// ─── Change Plan Modal ────────────────────────────────────────────────────────
+
+function ChangePlanModal({
+  isOpen,
+  onClose,
+  currentPlan,
+  currentCycle,
+  onSelectPlan,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  currentPlan: PlanId;
+  currentCycle: BillingCycle;
+  onSelectPlan: (plan: PlanId, cycle: BillingCycle) => void;
+}) {
+  const [cycle, setCycle] = useState<BillingCycle>(currentCycle);
+
+  useEffect(() => {
+    if (isOpen) setCycle(currentCycle);
+  }, [isOpen, currentCycle]);
+
+  if (!isOpen) return null;
+
+  const plans: PlanId[] = ['discover', 'grow'];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl p-6 w-full max-w-2xl mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Change Plan</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors focus:outline-none"
+            aria-label="Close"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Billing cycle toggle */}
+        <div className="flex items-center gap-2 mb-6 mt-4">
+          <span className="text-sm text-neutral-500 dark:text-neutral-400 mr-1">Billing:</span>
+          {(['monthly', 'yearly'] as BillingCycle[]).map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCycle(c)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
+                cycle === c
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+              }`}
+            >
+              {c === 'monthly' ? 'Monthly' : (
+                <span>Yearly <span className="text-xs opacity-80">save ~{getYearlySavings(PLANS.grow)}%</span></span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Plan cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {plans.map((planId) => {
+            const p = PLANS[planId];
+            const isCurrent = planId === currentPlan;
+            const price = cycle === 'yearly' ? p.yearlyPrice : p.monthlyPrice;
+            return (
+              <div
+                key={planId}
+                className={`rounded-xl border-2 p-5 relative ${
+                  isCurrent
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                    : 'border-neutral-200 dark:border-neutral-700'
+                }`}
+              >
+                {isCurrent && (
+                  <span className="absolute top-3 right-3 text-xs font-bold text-primary-600 dark:text-primary-400 bg-primary-100 dark:bg-primary-900/40 px-2 py-0.5 rounded-full">
+                    Current
+                  </span>
+                )}
+                {p.badge && !isCurrent && (
+                  <span className="absolute top-3 right-3 text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
+                    {p.badge}
+                  </span>
+                )}
+                <h3 className="text-base font-bold text-neutral-900 dark:text-neutral-100 mb-1">{p.name}</h3>
+                <div className="mb-3">
+                  <span className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">${price}</span>
+                  <span className="text-sm text-neutral-500 dark:text-neutral-400 ml-1">/{cycle === 'yearly' ? 'year' : 'month'}</span>
+                </div>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-4">{p.description}</p>
+                <ul className="space-y-1.5 mb-5">
+                  {[
+                    `${p.limits.adminUsers === 'unlimited' ? 'Unlimited' : `Up to ${p.limits.adminUsers}`} admin seats`,
+                    'Unlimited volunteers',
+                    `${p.limits.storageGb === 'unlimited' ? 'Unlimited' : `${p.limits.storageGb} GB`} storage`,
+                    ...(planId === 'grow' ? ['Custom branding & hours tracking', 'Applicant vetting & file library'] : []),
+                  ].map((feat) => (
+                    <li key={feat} className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-400">
+                      <Check size={12} className="text-success-500 shrink-0" />
+                      {feat}
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  variant={isCurrent ? 'outline' : 'primary'}
+                  className="w-full"
+                  disabled={isCurrent}
+                  onClick={() => { if (!isCurrent) onSelectPlan(planId, cycle); }}
+                >
+                  {isCurrent ? 'Current plan' : planId === 'grow' ? 'Upgrade to Grow' : 'Downgrade to Discover'}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-4 text-center">
+          Need Enterprise?{' '}
+          <a href="mailto:hello@volunteerflow.us" className="underline hover:text-neutral-600 dark:hover:text-neutral-300">
+            Contact us
+          </a>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function BillingTab() {
   const { setPlan } = usePlan();
   const [loading, setLoading] = useState(true);
@@ -1970,6 +2105,8 @@ function BillingTab() {
   const [paypalError, setPaypalError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isGatewayOpen, setIsGatewayOpen] = useState(false);
+  const [isChangePlanOpen, setIsChangePlanOpen] = useState(false);
+  const [pendingPlan, setPendingPlan] = useState<{ plan: PlanId; billingCycle: BillingCycle } | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -2022,9 +2159,10 @@ function BillingTab() {
   const handleStripeCheckout = async () => {
     if (!billingData) return;
     setCheckoutLoading(true);
+    const target = pendingPlan ?? { plan: billingData.plan, billingCycle: billingData.billingCycle };
     try {
       const { url } = await api.post<{ url: string }>('/billing/stripe/checkout', {
-        plan: billingData.plan, billingCycle: billingData.billingCycle,
+        plan: target.plan, billingCycle: target.billingCycle,
       });
       window.location.href = url;
     } catch (err: any) {
@@ -2046,16 +2184,38 @@ function BillingTab() {
 
   const handlePayPalApprove = async (data: { subscriptionID: string | null }) => {
     if (!billingData || !data.subscriptionID) return;
+    const target = pendingPlan ?? { plan: billingData.plan, billingCycle: billingData.billingCycle };
     try {
       await api.post('/billing/paypal/activate', {
         subscriptionId: data.subscriptionID,
-        plan: billingData.plan,
-        billingCycle: billingData.billingCycle,
+        plan: target.plan,
+        billingCycle: target.billingCycle,
       });
       setSuccessMsg('PayPal subscription activated! Your plan is now live.');
+      setPendingPlan(null);
       refresh();
     } catch (err: any) {
       setPaypalError(err?.message || 'Failed to activate PayPal subscription');
+    }
+  };
+
+  const handleSelectPlan = async (newPlan: PlanId, newCycle: BillingCycle) => {
+    if (!billingData) return;
+    setIsChangePlanOpen(false);
+    const planOrder: PlanId[] = ['discover', 'grow', 'enterprise'];
+    const isUpgrade = planOrder.indexOf(newPlan) > planOrder.indexOf(billingData.plan as PlanId);
+    if (isUpgrade) {
+      setPendingPlan({ plan: newPlan, billingCycle: newCycle });
+      setIsGatewayOpen(true);
+    } else {
+      // Downgrade — update via API directly
+      try {
+        await api.put('/billing/plan', { plan: newPlan, billingCycle: newCycle });
+        setSuccessMsg(`Plan changed to ${PLANS[newPlan].name}. Changes take effect at the end of your billing period.`);
+        refresh();
+      } catch (err: any) {
+        setPaypalError(err?.message || 'Failed to change plan');
+      }
     }
   };
 
@@ -2077,7 +2237,7 @@ function BillingTab() {
       <Card className="p-6">
         <div className="flex items-start justify-between mb-5">
           <SectionTitle title="Current Plan" />
-          <Button size="sm" variant="outline" onClick={() => window.location.href = '/pricing'}>Change Plan</Button>
+          <Button size="sm" variant="outline" onClick={() => setIsChangePlanOpen(true)}>Change Plan</Button>
         </div>
         {plan ? (
           <div className="p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl">
@@ -2219,11 +2379,15 @@ function BillingTab() {
               </Button>
               <PaymentGatewayModal
                 isOpen={isGatewayOpen}
-                onClose={() => setIsGatewayOpen(false)}
-                planName={plan?.name ?? ''}
-                billingCycle={billingData?.billingCycle ?? 'monthly'}
-                price={price ?? 0}
-                plan={billingData?.plan ?? ''}
+                onClose={() => { setIsGatewayOpen(false); setPendingPlan(null); }}
+                planName={pendingPlan ? PLANS[pendingPlan.plan].name : (plan?.name ?? '')}
+                billingCycle={pendingPlan?.billingCycle ?? billingData?.billingCycle ?? 'monthly'}
+                price={
+                  pendingPlan
+                    ? (pendingPlan.billingCycle === 'yearly' ? PLANS[pendingPlan.plan].yearlyPrice : PLANS[pendingPlan.plan].monthlyPrice) ?? 0
+                    : price ?? 0
+                }
+                plan={pendingPlan?.plan ?? billingData?.plan ?? ''}
                 onStripeClick={handleStripeCheckout}
                 onPayPalApprove={handlePayPalApprove}
                 onPayPalError={() => setPaypalError('PayPal encountered an error. Please try again or use card payment.')}
@@ -2233,6 +2397,14 @@ function BillingTab() {
           )}
         </Card>
       )}
+
+      <ChangePlanModal
+        isOpen={isChangePlanOpen}
+        onClose={() => setIsChangePlanOpen(false)}
+        currentPlan={(billingData?.plan ?? 'discover') as PlanId}
+        currentCycle={billingData?.billingCycle ?? 'monthly'}
+        onSelectPlan={handleSelectPlan}
+      />
 
       {/* Billing History */}
       <Card className="p-6">

@@ -1,9 +1,10 @@
 'use client';
 
-import { Bell, Search, User, Moon, Sun, LogOut } from 'lucide-react';
+import { Bell, Search, User, Moon, Sun, LogOut, MessageSquare } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
+import FeedbackModal from './FeedbackModal';
 
 interface UserInfo {
   name: string;
@@ -33,6 +34,7 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [userInfo, setUserInfo] = useState<UserInfo>({ name: 'Admin User', email: '' });
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -82,6 +84,15 @@ export default function Header() {
             </button>
           )}
 
+          {/* Feedback */}
+          <button
+            onClick={() => setIsFeedbackOpen(true)}
+            className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full transition-colors"
+            aria-label="Send feedback"
+          >
+            <MessageSquare className="w-[18px] h-[18px] text-neutral-500 dark:text-neutral-400" />
+          </button>
+
           {/* Notifications */}
           <button
             className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full transition-colors"
@@ -116,5 +127,6 @@ export default function Header() {
         </div>
       </div>
     </header>
+    <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
   );
 }

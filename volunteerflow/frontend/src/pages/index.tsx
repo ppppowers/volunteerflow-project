@@ -4,7 +4,6 @@ import Head from 'next/head';
 import Link from 'next/link';
 import Layout from '@/components/Layout';
 import Card from '@/components/Card';
-import FeedbackModal from '@/components/FeedbackModal';
 import {
   Users,
   Calendar,
@@ -111,7 +110,6 @@ export default function Dashboard() {
   const [volunteers, setVolunteers]     = useState<DashVolunteer[]>([]);
   const [loading, setLoading]           = useState(true);
   const [userName, setUserName]         = useState('');
-  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -213,13 +211,6 @@ export default function Dashboard() {
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
             </p>
           </div>
-          <button
-            onClick={() => setIsFeedbackOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
-          >
-            <MessageSquare size={14} />
-            Feedback
-          </button>
         </div>
 
         {/* Quick Actions */}
@@ -468,7 +459,6 @@ export default function Dashboard() {
 
         </div>
       </div>
-      <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
     </Layout>
   );
 }
