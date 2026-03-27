@@ -50,6 +50,7 @@ export default function Header() {
   };
 
   return (
+    <>
     <header
       className="bg-white dark:bg-neutral-900 px-6 py-3 transition-colors"
       style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
@@ -128,5 +129,6 @@ export default function Header() {
       </div>
     </header>
     <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
+    </>
   );
 }
