@@ -53,7 +53,7 @@ const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-const { pool, initializeDatabase } = require('./db');
+const { pool, initializeDatabase, seedOrgMessageTemplates } = require('./db');
 const { dispatchBulk, dispatchJobNotif, buildFrom } = require('./mailer');
 const createStaffRouter = require('./staff/index');
 
@@ -536,6 +536,7 @@ app.post('/api/auth/register', writeLimiter, async (req, res) => {
     const user = rows[0];
     // Also create a default org_settings row for this new org
     pool.query("INSERT INTO org_settings (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [user.id]).catch(() => {});
+    seedOrgMessageTemplates(user.id).catch(() => {});
     const token = jwt.sign(
       { sub: user.id, email: user.email, fullName: user.full_name, role: user.role, orgId: user.id },
       JWT_SECRET, { expiresIn: JWT_EXPIRES_IN }

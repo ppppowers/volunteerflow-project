@@ -842,6 +842,18 @@ async function seedMessageTemplates(client) {
   console.log('[DB] Message templates seeded.');
 }
 
+async function seedOrgMessageTemplates(orgId) {
+  for (const t of MESSAGE_TEMPLATES_SEED) {
+    const id = `${t.id}_${orgId}`;
+    await pool.query(
+      `INSERT INTO message_templates (id, org_id, name, channel, subject, body)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+      [id, orgId, t.name, t.channel, t.subject, t.body]
+    );
+  }
+  console.log(`[DB] Message templates seeded for org ${orgId}.`);
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 async function initDb() {
@@ -914,4 +926,4 @@ async function loadStaffSchema(client) {
 // initializeDatabase is the canonical startup function (alias kept for compatibility)
 const initializeDatabase = initDb;
 
-module.exports = { pool, initDb, initializeDatabase };
+module.exports = { pool, initDb, initializeDatabase, seedOrgMessageTemplates };
