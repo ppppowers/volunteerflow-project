@@ -137,12 +137,12 @@ export function VolunteersTab({
 
   return (
     <div className="space-y-4">
-      {/* Volunteer signup link banner */}
+      {/* Volunteer Application link banner */}
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border"
            style={{ background: '#6366f110', borderColor: '#6366f140' }}>
         <Link2 className="w-4 h-4 flex-shrink-0" style={{ color: '#6366f1' }} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Volunteer Signup Link</p>
+          <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">Volunteer Application Link</p>
         </div>
         {/* Form selector */}
         {onLinkForm && (

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import {
   signupFormConfigs,
+  getFormConfig,
   type FormField,
   type FieldType,
   type FormFieldOption,
@@ -310,12 +311,13 @@ function FieldRow({ field, index, total, onChange, onDelete, onMove }: FieldRowP
 // ─── SignupFormBuilder ────────────────────────────────────────────────────────
 
 export interface SignupFormBuilderProps {
-  type: 'volunteer' | 'member' | 'employee';
+  type: string;
+  label?: string;
   onClose: () => void;
 }
 
-export function SignupFormBuilder({ type, onClose }: SignupFormBuilderProps) {
-  const config = signupFormConfigs[type];
+export function SignupFormBuilder({ type, label, onClose }: SignupFormBuilderProps) {
+  const config = getFormConfig(type, label);
 
   const [title, setTitle] = useState(config.title);
   const [description, setDescription] = useState(config.description);
@@ -376,7 +378,7 @@ export function SignupFormBuilder({ type, onClose }: SignupFormBuilderProps) {
         <div className="flex items-center justify-between p-5 border-b border-neutral-200 dark:border-neutral-700">
           <div>
             <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-              Customize {type.charAt(0).toUpperCase() + type.slice(1)} Form
+              Customize {label ?? (type.charAt(0).toUpperCase() + type.slice(1))} Form
             </h2>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
               Changes apply to the public signup form at <code>/apply?type={type}</code>

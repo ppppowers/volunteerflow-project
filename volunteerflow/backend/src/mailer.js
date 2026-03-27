@@ -76,19 +76,26 @@ async function sendSms(to, body) {
 // ── Bulk dispatch ─────────────────────────────────────────────────────────────
 
 /**
+ * Convert a display name or subdomain to a safe email local part.
+ * @param {string} str
+ * @returns {string}
+ */
+function toEmailSlug(str) {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'noreply';
+}
+
+/**
  * Build a RFC 5321 "From" string from an org_settings row.
- * Returns undefined if nothing is configured (falls back to RESEND_FROM env var).
+ * Always uses @volunteerflow.us — no custom domain needed.
  *
- * @param {{ email_from_name?: string, email_from_address?: string }|null} settings
- * @returns {string|undefined}
+ * @param {{ email_from_name?: string, portal_subdomain?: string, org_name?: string }|null} settings
+ * @returns {string}
  */
 function buildFrom(settings) {
-  if (!settings) return undefined;
-  const name = (settings.email_from_name || '').trim();
-  const addr = (settings.email_from_address || '').trim();
-  if (name && addr) return `${name} <${addr}>`;
-  if (addr) return addr;
-  return undefined;
+  const name = (settings?.email_from_name || '').trim();
+  const slug = (settings?.portal_subdomain || '').trim() || toEmailSlug(name || (settings?.org_name || ''));
+  const addr = `${slug}@volunteerflow.us`;
+  return name ? `${name} <${addr}>` : addr;
 }
 
 /**

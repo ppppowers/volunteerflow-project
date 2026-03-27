@@ -19,7 +19,7 @@ export interface FormField {
 }
 
 export interface SignupFormConfig {
-  type: 'volunteer' | 'member' | 'employee';
+  type: string;
   title: string;
   description: string;
   submitLabel: string;
@@ -99,8 +99,33 @@ const EMPLOYEE_FIELDS: FormField[] = [
   { id: 'consent', type: 'checkbox', label: 'I confirm the information provided is accurate and I consent to background checks if required', placeholder: undefined, required: true, enabled: true },
 ];
 
+// Default fields for group signup forms
+export const DEFAULT_GROUP_FIELDS: FormField[] = [
+  { id: 'name',    type: 'text',     label: 'Full Name',    placeholder: 'Your full name',  required: true,  enabled: true, halfWidth: true },
+  { id: 'email',   type: 'email',    label: 'Email Address',placeholder: 'you@example.com', required: true,  enabled: true, halfWidth: true },
+  { id: 'phone',   type: 'tel',      label: 'Phone Number', placeholder: '+1 555-0000',     required: false, enabled: true, halfWidth: true },
+  { id: 'message', type: 'textarea', label: 'Why do you want to join?', placeholder: 'Tell us a bit about yourself…', required: false, enabled: true },
+  { id: 'terms',   type: 'checkbox', label: 'I agree to the terms and conditions', placeholder: undefined, required: true, enabled: true },
+];
+
+// Returns the stored or default config for any form key (built-in or group_<id>)
+export function getFormConfig(key: string, fallbackTitle?: string): SignupFormConfig {
+  if (signupFormConfigs[key]) return signupFormConfigs[key];
+  try {
+    const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}') as Record<string, SignupFormConfig>;
+    if (stored[key]) return stored[key];
+  } catch { /* ignore */ }
+  return {
+    type: key,
+    title: fallbackTitle ?? 'Group Signup',
+    description: 'Fill out this form to sign up for this group.',
+    submitLabel: 'Submit',
+    fields: DEFAULT_GROUP_FIELDS.map((f) => ({ ...f })),
+  };
+}
+
 // Mutable module-level configs — admin builder writes here, /signup page reads here
-export const signupFormConfigs: Record<'volunteer' | 'member' | 'employee', SignupFormConfig> = {
+export const signupFormConfigs: Record<string, SignupFormConfig> = {
   volunteer: {
     type: 'volunteer',
     title: 'Volunteer Application',

@@ -65,6 +65,7 @@ interface TeamMember {
   name: string;
   email: string;
   role: string;
+  isOwner?: boolean;
   avatar?: string;
   joinedAt: string;
   lastActive: string;
@@ -302,12 +303,12 @@ function TeamTab() {
 
   useEffect(() => {
     Promise.all([
-      api.get<Array<{ id: string; name: string; email: string; role: string; joinedAt: string }>>('/team'),
+      api.get<Array<{ id: string; name: string; email: string; role: string; isOwner: boolean; joinedAt: string }>>('/team'),
       api.get<OrgRole[]>('/roles'),
     ]).then(([teamRows, roleRows]) => {
       setTeam(teamRows.map((u) => ({
         id: u.id, name: u.name || u.email, email: u.email,
-        role: u.role,
+        role: u.role, isOwner: u.isOwner,
         joinedAt: u.joinedAt || '', lastActive: u.joinedAt || '',
       })));
       setOrgRoles(roleRows);
@@ -418,9 +419,14 @@ function TeamTab() {
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{member.name}</p>
-                    {memberRole && (
+                    {member.isOwner && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+                        Owner
+                      </span>
+                    )}
+                    {!member.isOwner && memberRole && (
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${memberRole.color}`}>
                         {memberRole.name}
                       </span>
@@ -435,20 +441,24 @@ function TeamTab() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <select
-                    value={member.role}
-                    onChange={(e) => handleRoleChange(member.id, e.target.value)}
-                    className="text-xs px-2 py-1.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:ring-1 focus:ring-primary-500 outline-none"
-                  >
-                    {orgRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
-                  <button
-                    onClick={() => handleRemove(member.id)}
-                    className="p-1.5 rounded hover:bg-danger-50 dark:hover:bg-danger-900/30 text-neutral-400 hover:text-danger-600 dark:hover:text-danger-400 transition-colors"
-                    title="Remove member"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {!member.isOwner && (
+                    <>
+                      <select
+                        value={member.role}
+                        onChange={(e) => handleRoleChange(member.id, e.target.value)}
+                        className="text-xs px-2 py-1.5 border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:ring-1 focus:ring-primary-500 outline-none"
+                      >
+                        {orgRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      <button
+                        onClick={() => handleRemove(member.id)}
+                        className="p-1.5 rounded hover:bg-danger-50 dark:hover:bg-danger-900/30 text-neutral-400 hover:text-danger-600 dark:hover:text-danger-400 transition-colors"
+                        title="Remove member"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -2824,27 +2834,12 @@ function MessagingTab() {
 
           <Field
             label="Sender Email Address"
-            hint="Must match a domain verified in your Resend account. Leave blank to use the platform default."
+            hint="Auto-generated from your sender name — powered by volunteerflow.us. No domain setup required."
           >
-            <input
-              type="email"
-              value={form.emailFromAddress}
-              onChange={(e) => set('emailFromAddress')(e.target.value)}
-              placeholder="noreply@yourorg.com"
-              className={inputClass}
-            />
-          </Field>
-
-          {form.emailFromAddress && (
-            <div className="flex items-start gap-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 px-4 py-3">
-              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                <strong>Domain verification required.</strong> The domain of this address must be verified in your{' '}
-                <span className="font-mono">RESEND_API_KEY</span> account before emails will deliver. Unverified senders
-                will be rejected by Resend.
-              </p>
+            <div className="flex items-center gap-2 px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg text-sm text-neutral-600 dark:text-neutral-400 font-mono select-all">
+              {form.emailFromAddress || 'yourorg@volunteerflow.us'}
             </div>
-          )}
+          </Field>
         </div>
       </Card>
 
@@ -2897,29 +2892,45 @@ function MessagingTab() {
 
 // ─── SignupFormTab ──────────────────────────────────────────────────────────────
 
-const FORM_TYPES = [
-  { type: 'volunteer' as const, label: 'Volunteer Profile',  icon: UserCheck, desc: 'Fields volunteers fill out when creating their account after approval.'  },
-  { type: 'member'    as const, label: 'Member Profile',     icon: Users,     desc: 'Fields members fill out when creating their account after approval.'    },
-  { type: 'employee'  as const, label: 'Employee Profile',   icon: Crown,     desc: 'Fields employees fill out when creating their account after approval.'  },
+const DEFAULT_FORM_TYPES = [
+  { type: 'volunteer', label: 'Volunteer Signup', icon: UserCheck, desc: 'Fields volunteers fill out when creating their account after approval.' },
+  { type: 'employee',  label: 'Staff Signup',     icon: Crown,     desc: 'Fields staff members fill out when creating their account after approval.' },
 ];
 
-function SignupFormTab() {
-  const [editing, setEditing] = useState<'volunteer' | 'member' | 'employee' | null>(null);
-  const [fieldCounts, setFieldCounts] = useState<Record<string, { active: number; total: number }>>({});
+interface GroupItem { id: string; name: string; }
 
-  const refreshCounts = () => {
+function SignupFormTab() {
+  const [editing, setEditing] = useState<{ type: string; label: string } | null>(null);
+  const [fieldCounts, setFieldCounts] = useState<Record<string, { active: number; total: number }>>({});
+  const [groups, setGroups] = useState<GroupItem[]>([]);
+
+  const refreshCounts = (groupList?: GroupItem[]) => {
     try {
       const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}');
       const counts: Record<string, { active: number; total: number }> = {};
-      for (const { type } of FORM_TYPES) {
-        const fields = (stored[type] ?? signupFormConfigs[type]).fields;
-        counts[type] = { active: fields.filter((f: { enabled: boolean }) => f.enabled).length, total: fields.length };
+      const allTypes = [
+        ...DEFAULT_FORM_TYPES.map((f) => ({ type: f.type, label: f.label })),
+        ...(groupList ?? groups).map((g) => ({ type: `group_${g.id}`, label: g.name })),
+      ];
+      for (const { type } of allTypes) {
+        const cfg = stored[type] ?? signupFormConfigs[type];
+        const fields: { enabled: boolean }[] = cfg?.fields ?? [];
+        counts[type] = { active: fields.filter((f) => f.enabled).length, total: fields.length };
       }
       setFieldCounts(counts);
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { refreshCounts(); }, []);
+  useEffect(() => {
+    api.get<GroupItem[]>('/people/groups')
+      .then((data) => { setGroups(data); refreshCounts(data); })
+      .catch(() => refreshCounts([]));
+  }, []);
+
+  const rows = [
+    ...DEFAULT_FORM_TYPES.map(({ type, label, icon, desc }) => ({ type, label, icon, desc })),
+    ...groups.map((g) => ({ type: `group_${g.id}`, label: `${g.name} Signup`, icon: Users, desc: `Signup form for members of the ${g.name} group.` })),
+  ];
 
   return (
     <div className="space-y-5">
@@ -2928,7 +2939,7 @@ function SignupFormTab() {
       </p>
 
       <div className="space-y-3">
-        {FORM_TYPES.map(({ type, label, desc, icon: Icon }) => {
+        {rows.map(({ type, label, desc, icon: Icon }) => {
           const counts = fieldCounts[type] ?? { active: 0, total: 0 };
           return (
             <div
@@ -2942,12 +2953,12 @@ function SignupFormTab() {
                 <div>
                   <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{label}</p>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {counts.active} of {counts.total} fields active · {desc}
+                    {counts.active > 0 ? `${counts.active} of ${counts.total} fields active · ` : ''}{desc}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setEditing(type)}
+                onClick={() => setEditing({ type, label })}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex-shrink-0"
               >
                 <Edit className="w-3.5 h-3.5" />
@@ -2960,7 +2971,8 @@ function SignupFormTab() {
 
       {editing && (
         <SignupFormBuilder
-          type={editing}
+          type={editing.type}
+          label={editing.label}
           onClose={() => { setEditing(null); refreshCounts(); }}
         />
       )}

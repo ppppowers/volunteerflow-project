@@ -2403,7 +2403,7 @@ app.delete('/api/people/groups/:id', requireAuth, requirePlan('grow'), writeLimi
 
 // ─── Application Templates ────────────────────────────────────────────────────
 
-app.get('/api/application-templates', requireAuth, requirePlan('grow'), async (req, res) => {
+app.get('/api/application-templates', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT * FROM application_templates WHERE org_id = $1 ORDER BY created_at DESC', [req.orgId]
@@ -2415,7 +2415,7 @@ app.get('/api/application-templates', requireAuth, requirePlan('grow'), async (r
   }
 });
 
-app.post('/api/application-templates', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
+app.post('/api/application-templates', requireAuth, writeLimiter, async (req, res) => {
   try {
     const { name, description, questions, status } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -2441,7 +2441,7 @@ app.post('/api/application-templates', requireAuth, requirePlan('grow'), writeLi
   }
 });
 
-app.put('/api/application-templates/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
+app.put('/api/application-templates/:id', requireAuth, writeLimiter, async (req, res) => {
   try {
     const { name, description, questions, status } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -2467,7 +2467,7 @@ app.put('/api/application-templates/:id', requireAuth, requirePlan('grow'), writ
   }
 });
 
-app.delete('/api/application-templates/:id', requireAuth, requirePlan('grow'), writeLimiter, async (req, res) => {
+app.delete('/api/application-templates/:id', requireAuth, writeLimiter, async (req, res) => {
   try {
     await pool.query('DELETE FROM application_templates WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
     logAudit({ req, category: 'settings', verb: 'deleted', resource: 'Application Template', detail: req.params.id });
@@ -2544,7 +2544,7 @@ app.post('/api/form-submissions/public', writeLimiter, async (req, res) => {
   }
 });
 
-app.get('/api/form-submissions', requireAuth, requirePlan('grow'), async (req, res) => {
+app.get('/api/form-submissions', requireAuth, async (req, res) => {
   try {
     const { status, templateId } = req.query;
     const conditions = [`org_id = $1`];
@@ -2572,7 +2572,7 @@ app.get('/api/form-submissions', requireAuth, requirePlan('grow'), async (req, r
   }
 });
 
-app.put('/api/form-submissions/:id', requireAuth, requirePlan('grow'), async (req, res) => {
+app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
   try {
     const { status } = req.body;
     if (!['APPROVED', 'REJECTED', 'PENDING'].includes(status)) {
@@ -3143,7 +3143,7 @@ async function getOrgSettings(orgId) {
 function mapOrgSettings(s) {
   return {
     emailFromName:    s.email_from_name    || '',
-    emailFromAddress: s.email_from_address || '',
+    emailFromAddress: buildFrom(s).match(/<(.+)>/)?.[1] ?? buildFrom(s),
     smsFromName:      s.sms_from_name      || '',
     orgName:          s.org_name           || '',
     website:          s.website            || '',
@@ -3303,20 +3303,23 @@ app.put('/api/notifications', requireAuth, writeLimiter, async (req, res) => {
 // ── Messaging settings ────────────────────────────────────────────────────────
 
 app.put('/api/messaging', requireAuth, writeLimiter, async (req, res) => {
-  const { emailFromName = '', emailFromAddress = '', smsFromName = '' } = req.body;
+  const { emailFromName = '', smsFromName = '' } = req.body;
   try {
     await pool.query(
-      `INSERT INTO org_settings (id, email_from_name, email_from_address, sms_from_name, updated_at)
-       VALUES ($4,$1,$2,$3,NOW())
+      `INSERT INTO org_settings (id, email_from_name, sms_from_name, updated_at)
+       VALUES ($3,$1,$2,NOW())
        ON CONFLICT (id) DO UPDATE SET
-         email_from_name=$1, email_from_address=$2, sms_from_name=$3, updated_at=NOW()`,
-      [emailFromName.trim().slice(0, 100), emailFromAddress.trim().slice(0, 200), smsFromName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11), req.orgId]
+         email_from_name=$1, sms_from_name=$2, updated_at=NOW()`,
+      [emailFromName.trim().slice(0, 100), smsFromName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11), req.orgId]
     );
+    // Re-read to get the computed emailFromAddress
+    const { rows } = await pool.query('SELECT * FROM org_settings WHERE id = $1', [req.orgId]);
+    const s = rows[0] || {};
     logAudit({ req, category: 'settings', verb: 'updated', resource: 'Messaging Settings', detail: '' });
     res.json({ success: true, data: {
-      emailFromName: emailFromName.trim().slice(0, 100),
-      emailFromAddress: emailFromAddress.trim().slice(0, 200),
-      smsFromName: smsFromName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11),
+      emailFromName: s.email_from_name || '',
+      emailFromAddress: buildFrom(s).match(/<(.+)>/)?.[1] ?? buildFrom(s),
+      smsFromName: s.sms_from_name || '',
     }});
   } catch (err) {
     console.error('PUT /api/messaging error:', err.message);
@@ -3515,9 +3518,10 @@ app.get('/api/team', requireAuth, async (req, res) => {
     );
     res.json({ success: true, data: rows.map(u => ({
       id: u.id,
-      name: u.full_name,
+      name: u.full_name || u.email,
       email: u.email,
       role: u.role,
+      isOwner: u.id === req.orgId,
       joinedAt: u.created_at instanceof Date ? u.created_at.toISOString().split('T')[0] : (u.created_at || '').split('T')[0],
     })) });
   } catch (err) {

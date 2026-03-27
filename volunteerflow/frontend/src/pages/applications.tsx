@@ -467,6 +467,7 @@ export default function Applications() {
   const [usingMockData, setUsingMockData] = useState(false);
 
   const [creatingDefault, setCreatingDefault] = useState(false);
+  const [defaultError, setDefaultError] = useState<string | null>(null);
 
   // Builder state
   const [editingTemplate, setEditingTemplate] = useState<ApplicationTemplate | null>(null);
@@ -556,6 +557,7 @@ export default function Applications() {
 
   const handleUseDefault = async () => {
     setCreatingDefault(true);
+    setDefaultError(null);
     try {
       const saved = await api.post<ApplicationTemplate>('/application-templates', {
         name: 'Volunteer Application',
@@ -564,8 +566,9 @@ export default function Applications() {
         status: 'active',
       });
       setTemplates((prev) => [...prev, saved]);
-    } catch {
-      // fall through — let the user try again
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create template';
+      setDefaultError(msg);
     } finally {
       setCreatingDefault(false);
     }
@@ -883,6 +886,9 @@ export default function Applications() {
                     </>
                   )}
                 </Button>
+                {defaultError && (
+                  <p className="mt-2 text-xs text-red-600 dark:text-red-400">{defaultError}</p>
+                )}
               </div>
             </div>
           </div>
