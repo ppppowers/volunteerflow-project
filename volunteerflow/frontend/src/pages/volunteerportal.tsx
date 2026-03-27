@@ -22,10 +22,10 @@ async function portalFetch<T>(method: string, path: string, body?: unknown): Pro
 }
 
 const portalApi = {
-  get:    <T>(path: string)               => portalFetch<T>('GET',    path),
-  post:   <T>(path: string, body: unknown) => portalFetch<T>('POST',   path, body),
-  put:    <T>(path: string, body: unknown) => portalFetch<T>('PUT',    path, body),
-  delete: <T>(path: string)               => portalFetch<T>('DELETE', path),
+  get:    <T,>(path: string)               => portalFetch<T>('GET',    path),
+  post:   <T,>(path: string, body: unknown) => portalFetch<T>('POST',   path, body),
+  put:    <T,>(path: string, body: unknown) => portalFetch<T>('PUT',    path, body),
+  delete: <T,>(path: string)               => portalFetch<T>('DELETE', path),
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
