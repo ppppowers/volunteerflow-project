@@ -302,18 +302,22 @@ function TeamTab() {
   const [inviteSent, setInviteSent] = useState(false);
 
   useEffect(() => {
-    Promise.all([
+    Promise.allSettled([
       api.get<Array<{ id: string; name: string; email: string; role: string; isOwner: boolean; joinedAt: string }>>('/team'),
       api.get<OrgRole[]>('/roles'),
-    ]).then(([teamRows, roleRows]) => {
-      setTeam(teamRows.map((u) => ({
-        id: u.id, name: u.name || u.email, email: u.email,
-        role: u.role, isOwner: u.isOwner,
-        joinedAt: u.joinedAt || '', lastActive: u.joinedAt || '',
-      })));
-      setOrgRoles(roleRows);
-      if (roleRows.length) setInviteRoleId(roleRows[0].id);
-    }).catch(() => {}).finally(() => setLoading(false));
+    ]).then(([teamResult, rolesResult]) => {
+      if (teamResult.status === 'fulfilled') {
+        setTeam(teamResult.value.map((u) => ({
+          id: u.id, name: u.name || u.email, email: u.email,
+          role: u.role, isOwner: u.isOwner,
+          joinedAt: u.joinedAt || '', lastActive: u.joinedAt || '',
+        })));
+      }
+      if (rolesResult.status === 'fulfilled') {
+        setOrgRoles(rolesResult.value);
+        if (rolesResult.value.length) setInviteRoleId(rolesResult.value[0].id);
+      }
+    }).finally(() => setLoading(false));
   }, []);
 
   const roleMap = Object.fromEntries(orgRoles.map((r) => [r.id, r]));

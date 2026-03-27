@@ -497,19 +497,18 @@ export default function Applications() {
   useEffect(() => {
     let cancelled = false;
     setLoadingTemplates(true);
-    Promise.all([
+    Promise.allSettled([
       api.get<ApplicationTemplate[]>('/application-templates'),
       api.get<GroupItem[]>('/people/groups'),
       api.get<{ volunteerFormId: string | null }>('/settings/volunteer-form'),
     ])
-      .then(([tmplData, groupData, volFormData]) => {
+      .then(([tmplResult, groupResult, volFormResult]) => {
         if (!cancelled) {
-          setTemplates(tmplData);
-          setGroups(groupData);
-          setVolunteerFormId(volFormData.volunteerFormId);
+          if (tmplResult.status === 'fulfilled') setTemplates(tmplResult.value);
+          if (groupResult.status === 'fulfilled') setGroups(groupResult.value);
+          if (volFormResult.status === 'fulfilled') setVolunteerFormId(volFormResult.value.volunteerFormId);
         }
       })
-      .catch(() => { if (!cancelled) { setTemplates([]); setGroups([]); } })
       .finally(() => { if (!cancelled) setLoadingTemplates(false); });
     return () => { cancelled = true; };
   }, []);

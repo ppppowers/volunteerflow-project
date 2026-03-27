@@ -1,5 +1,70 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Head from 'next/head';
+
+// ─── Portal API client (uses separate vp_token to avoid conflicts with staff auth) ──
+
+const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
+const VP_TOKEN_KEY = 'vp_token';
+
+async function portalFetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem(VP_TOKEN_KEY) : null;
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  const json = await res.json().catch(() => ({})) as { success?: boolean; data?: T; error?: string };
+  if (!res.ok) throw new Error((json as { error?: string }).error ?? `HTTP ${res.status}`);
+  return (json?.success !== undefined && 'data' in json ? json.data : json) as T;
+}
+
+const portalApi = {
+  get:    <T>(path: string)               => portalFetch<T>('GET',    path),
+  post:   <T>(path: string, body: unknown) => portalFetch<T>('POST',   path, body),
+  put:    <T>(path: string, body: unknown) => portalFetch<T>('PUT',    path, body),
+  delete: <T>(path: string)               => portalFetch<T>('DELETE', path),
+};
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface PortalEvent {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  location: string;
+  startDate: string | null;
+  endDate: string | null;
+  spotsAvailable: number;
+  participantCount: number;
+}
+
+interface PortalSignup {
+  id: string;
+  event_id: string;
+  status: string;
+  title: string;
+  start_date: string | null;
+  end_date: string | null;
+  location: string;
+  category: string;
+  description: string;
+}
+
+interface VolunteerProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  name: string;
+  email: string;
+  phone: string;
+  joinDate: string;
+  hoursContributed: number;
+  status: string;
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -14,60 +79,98 @@ const EyeIcon = ({ open }: { open: boolean }) => open ? (
   </svg>
 );
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-
-const MOCK_VOLUNTEER = { name: 'Maria González', email: 'maria@example.org', phone: '(555) 012-3456', since: 'March 2024', initials: 'MG' };
-
-const MOCK_EVENTS = [
-  { id: 1, title: 'Community Garden Restoration', month: 'JUL', day: '14', time: '9:00 AM – 1:00 PM', location: 'Riverside Park, Block C', desc: 'Help restore our community garden — planting, weeding, and building new raised beds. No experience needed, gloves provided!', needed: 20, signups: 14, category: 'Environment' },
-  { id: 2, title: 'Senior Center Lunch Program',  month: 'JUL', day: '18', time: '11:00 AM – 2:00 PM', location: 'Oakwood Senior Center', desc: 'Assist with meal preparation and service for local seniors. A wonderful opportunity to connect with the community.', needed: 8, signups: 8, category: 'Care' },
-  { id: 3, title: 'Youth Coding Workshop', month: 'JUL', day: '22', time: '10:00 AM – 4:00 PM', location: 'Central Library, Room 3B', desc: 'Help teach kids ages 10–14 the basics of coding with Scratch and Python. Beginner-friendly curriculum provided.', needed: 6, signups: 3, category: 'Education' },
-  { id: 4, title: 'Food Bank Sorting Day', month: 'AUG', day: '02', time: '8:00 AM – 12:00 PM', location: 'Downtown Food Bank', desc: 'Sort and pack donated food items for distribution across the city. Physical activity involved — wear comfortable clothing.', needed: 25, signups: 11, category: 'Community' },
-  { id: 5, title: 'Park Trail Cleanup', month: 'AUG', day: '09', time: '7:30 AM – 11:00 AM', location: 'Greenwood Trail Head', desc: 'Join us for a morning cleanup of the park trail. Trash bags and gloves provided.', needed: 15, signups: 15, category: 'Environment' },
-];
-
-const PAST_EVENTS = [
-  { id: 101, title: 'Spring Food Drive', month: 'MAY', day: '10', time: '9:00 AM – 1:00 PM', location: 'Community Center', desc: 'Helped sort and pack over 800 lbs of food donations.', hours: 4 },
-  { id: 102, title: 'Youth Mentorship Kickoff', month: 'JUN', day: '03', time: '2:00 PM – 5:00 PM', location: 'West Side Library', desc: 'Introduced students to our summer mentorship program.', hours: 3 },
-];
-
-// ─── Shared helpers ───────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const inputCls = 'w-full px-3 py-2.5 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none placeholder-neutral-400 dark:placeholder-neutral-500 transition-colors';
 
+function getInitials(name: string): string {
+  return name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+}
+
+function parseEventDate(dateStr: string | null): { month: string; day: string; timeStr: string } {
+  if (!dateStr) return { month: '—', day: '—', timeStr: '' };
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return { month: '—', day: '—', timeStr: '' };
+  return {
+    month: d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
+    day: String(d.getDate()),
+    timeStr: d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+  };
+}
+
+function formatEventTime(startDate: string | null, endDate: string | null): string {
+  if (!startDate) return '';
+  const s = parseEventDate(startDate);
+  const e = endDate ? parseEventDate(endDate) : null;
+  if (!e || !endDate) return s.timeStr;
+  const eTime = new Date(endDate).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${s.timeStr} – ${eTime}`;
+}
+
+function isUpcoming(dateStr: string | null): boolean {
+  if (!dateStr) return true;
+  return new Date(dateStr) > new Date();
+}
+
+function formatJoinDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
-function LoginPage({ onLogin }: { onLogin: () => void }) {
+function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw]     = useState(false);
   const [errors, setErrors]     = useState<Record<string, string>>({});
   const [loading, setLoading]   = useState(false);
-  const [forgotMsg, setForgotMsg] = useState('');
+  const [loginError, setLoginError] = useState('');
 
-  const submit = () => {
+  const submit = async () => {
     const e: Record<string, string> = {};
     if (!email) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Enter a valid email';
     if (!password) e.password = 'Password is required';
     setErrors(e);
     if (Object.keys(e).length) return;
+
     setLoading(true);
-    setTimeout(() => { setLoading(false); onLogin(); }, 1100);
+    setLoginError('');
+    try {
+      const res = await portalFetch<{ token: string; user: { id: string; email: string; fullName: string } }>(
+        'POST', '/auth/login', { email: email.trim().toLowerCase(), password }
+      );
+      localStorage.setItem(VP_TOKEN_KEY, res.token);
+      // Fetch volunteer profile
+      const profile = await portalApi.get<VolunteerProfile>('/portal/profile');
+      onLogin(profile);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      if (msg.includes('profile not found')) {
+        setLoginError('No volunteer account found for this email. Contact your organization.');
+      } else if (msg.includes('Invalid email') || msg.includes('401')) {
+        setLoginError('Invalid email or password.');
+      } else {
+        setLoginError(msg);
+      }
+      localStorage.removeItem(VP_TOKEN_KEY);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen flex bg-neutral-50 dark:bg-neutral-950">
       {/* Left panel */}
       <div className="hidden md:flex md:w-[440px] lg:w-[480px] flex-shrink-0 bg-neutral-900 dark:bg-neutral-950 flex-col justify-end p-12 relative overflow-hidden">
-        {/* Decorative circles */}
         <div className="absolute inset-0 pointer-events-none">
           <div className="absolute -top-36 -left-24 w-[500px] h-[500px] rounded-full bg-primary-500 opacity-10" />
           <div className="absolute bottom-20 -right-16 w-72 h-72 rounded-full bg-primary-400 opacity-10" />
         </div>
-        {/* Dot grid */}
         <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-
         <div className="relative z-10">
           <div className="inline-flex items-center gap-2 mb-6 px-3 py-1.5 rounded-full border border-white/15 bg-white/10 text-white/70 text-xs font-semibold uppercase tracking-wider">
             <div className="w-1.5 h-1.5 rounded-full bg-primary-400" />
@@ -93,7 +196,6 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
       {/* Right: form */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-[420px]">
-          {/* Logo */}
           <div className="flex items-center gap-2.5 mb-10">
             <div className="w-9 h-9 bg-primary-600 dark:bg-primary-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-sm">V</span>
@@ -104,13 +206,17 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
           <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-2">Welcome back</h2>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Sign in to your volunteer account to get started.</p>
 
-          {/* Info notice */}
           <div className="flex gap-2.5 p-3 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-300 text-sm mb-6">
             <span className="mt-0.5 flex-shrink-0">ℹ️</span>
-            <span>Volunteer accounts are created automatically after your application is reviewed and approved by the organization.</span>
+            <span>Volunteer accounts are created automatically after your application is reviewed and approved.</span>
           </div>
 
-          {/* Email */}
+          {loginError && (
+            <div className="mb-4 p-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-300 text-sm">
+              {loginError}
+            </div>
+          )}
+
           <div className="mb-4">
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">Email Address</label>
             <input
@@ -118,26 +224,21 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
               placeholder="you@example.com"
               value={email}
               onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && submit()}
               className={`${inputCls}${errors.email ? ' !border-danger-500 !ring-danger-500/30' : ''}`}
             />
             {errors.email && <p className="mt-1 text-xs text-danger-500 dark:text-danger-400">{errors.email}</p>}
           </div>
 
-          {/* Password */}
           <div className="mb-6">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
-              <button type="button" className="text-xs text-primary-600 dark:text-primary-400 hover:underline" onClick={() => setForgotMsg('Check your email for a password reset link.')}>
-                Forgot password?
-              </button>
-            </div>
-            {forgotMsg && <p className="text-xs text-success-600 dark:text-success-400 mb-1">{forgotMsg}</p>}
+            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">Password</label>
             <div className="relative">
               <input
                 type={showPw ? 'text' : 'password'}
                 placeholder="Enter your password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submit()}
                 className={`${inputCls} pr-10${errors.password ? ' !border-danger-500 !ring-danger-500/30' : ''}`}
               />
               <button type="button" onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300">
@@ -163,7 +264,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
-function TopBar({ onLogout }: { onLogout: () => void }) {
+function TopBar({ profile, onLogout }: { profile: VolunteerProfile; onLogout: () => void }) {
   return (
     <div className="h-14 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-700 flex items-center px-4 gap-3 sticky top-0 z-50">
       <div className="flex items-center gap-2 mr-auto">
@@ -176,7 +277,7 @@ function TopBar({ onLogout }: { onLogout: () => void }) {
         Volunteer
       </span>
       <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center text-primary-700 dark:text-primary-300 font-bold text-xs border-2 border-primary-200 dark:border-primary-700">
-        {MOCK_VOLUNTEER.initials}
+        {getInitials(profile.name)}
       </div>
       <button onClick={onLogout} className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors px-2 py-1">
         Sign out
@@ -218,7 +319,7 @@ function BottomNav({ tab, setTab, myCount }: { tab: Tab; setTab: (t: Tab) => voi
   );
 }
 
-// ─── Event Date Block ──────────────────────────────────────────────────────────
+// ─── Event Date Block ─────────────────────────────────────────────────────────
 
 function DateBlock({ month, day, dark = false, muted = false }: { month: string; day: string; dark?: boolean; muted?: boolean }) {
   if (dark) return (
@@ -243,9 +344,25 @@ function DateBlock({ month, day, dark = false, muted = false }: { month: string;
 
 // ─── Home Tab ─────────────────────────────────────────────────────────────────
 
-function HomeTab({ myEvents, setTab }: { myEvents: number[]; setTab: (t: Tab) => void }) {
-  const upcoming   = MOCK_EVENTS.filter(e => myEvents.includes(e.id)).slice(0, 2);
-  const totalHours = PAST_EVENTS.reduce((s, e) => s + e.hours, 0);
+function HomeTab({
+  profile, signups, events, setTab,
+}: {
+  profile: VolunteerProfile;
+  signups: PortalSignup[];
+  events: PortalEvent[];
+  setTab: (t: Tab) => void;
+}) {
+  const now = new Date();
+  const upcomingSignups = signups.filter(s => isUpcoming(s.start_date));
+  const pastSignups     = signups.filter(s => !isUpcoming(s.start_date));
+  const availableCount  = events.filter(ev => {
+    const alreadySigned = signups.some(s => s.event_id === ev.id);
+    return !alreadySigned && ev.participantCount < ev.spotsAvailable && isUpcoming(ev.startDate);
+  }).length;
+
+  const firstName = profile.firstName || profile.name.split(' ')[0] || 'there';
+  const hour = now.getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   return (
     <div>
@@ -256,13 +373,13 @@ function HomeTab({ myEvents, setTab }: { myEvents: number[]; setTab: (t: Tab) =>
           <div className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full bg-primary-400 opacity-8" />
         </div>
         <div className="relative z-10">
-          <p className="text-white/50 text-sm mb-1">Good morning 👋</p>
-          <p className="text-2xl font-bold text-white mb-5">Hello, <span className="text-primary-400">{MOCK_VOLUNTEER.name.split(' ')[0]}</span></p>
+          <p className="text-white/50 text-sm mb-1">{greeting} 👋</p>
+          <p className="text-2xl font-bold text-white mb-5">Hello, <span className="text-primary-400">{firstName}</span></p>
           <div className="grid grid-cols-3 gap-3">
             {[
-              [myEvents.length,     'Upcoming'],
-              [PAST_EVENTS.length,  'Completed'],
-              [`${totalHours}h`,    'Hours given'],
+              [upcomingSignups.length,            'Upcoming'],
+              [pastSignups.length,                'Completed'],
+              [`${profile.hoursContributed}h`,   'Hours given'],
             ].map(([val, label]) => (
               <div key={String(label)} className="bg-white/7 border border-white/9 rounded-xl px-3 py-3.5 text-center">
                 <div className="text-2xl font-bold text-white leading-none">{val}</div>
@@ -274,24 +391,28 @@ function HomeTab({ myEvents, setTab }: { myEvents: number[]; setTab: (t: Tab) =>
       </div>
 
       {/* Next events */}
-      {upcoming.length > 0 && (
+      {upcomingSignups.length > 0 && (
         <div className="mb-5">
           <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-3">Your next events</h3>
-          {upcoming.map(ev => (
-            <div key={ev.id} className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 mb-2.5 flex gap-3 items-center shadow-sm">
-              <DateBlock month={ev.month} day={ev.day} dark />
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 truncate">{ev.title}</div>
-                <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">⏰ {ev.time}</div>
+          {upcomingSignups.slice(0, 2).map(s => {
+            const { month, day } = parseEventDate(s.start_date);
+            const time = formatEventTime(s.start_date, s.end_date);
+            return (
+              <div key={s.id} className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 mb-2.5 flex gap-3 items-center shadow-sm">
+                <DateBlock month={month} day={day} dark />
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 truncate">{s.title}</div>
+                  {time && <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">⏰ {time}</div>}
+                </div>
+                <span className="flex items-center gap-1 px-2.5 py-1 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-[11px] font-bold rounded-full border border-success-200 dark:border-success-800">
+                  ✓ Going
+                </span>
               </div>
-              <span className="flex items-center gap-1 px-2.5 py-1 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-[11px] font-bold rounded-full border border-success-200 dark:border-success-800">
-                ✓ Going
-              </span>
-            </div>
-          ))}
-          {myEvents.length > 2 && (
+            );
+          })}
+          {upcomingSignups.length > 2 && (
             <button onClick={() => setTab('myevents')} className="w-full py-2 text-sm text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700 rounded-xl hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-              View all {myEvents.length} events →
+              View all {upcomingSignups.length} events →
             </button>
           )}
         </div>
@@ -301,10 +422,19 @@ function HomeTab({ myEvents, setTab }: { myEvents: number[]; setTab: (t: Tab) =>
       <div>
         <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-3">Find opportunities</h3>
         <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-5 shadow-sm">
-          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-1">
-            {MOCK_EVENTS.filter(e => !myEvents.includes(e.id) && e.signups < e.needed).length} events available to join
-          </p>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Browse upcoming volunteer opportunities and sign up for events that fit your schedule.</p>
+          {availableCount > 0 ? (
+            <>
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-1">
+                {availableCount} event{availableCount !== 1 ? 's' : ''} available to join
+              </p>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Browse upcoming volunteer opportunities and sign up for events that fit your schedule.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-1">No new events right now</p>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Check back soon — your organization will post new opportunities here.</p>
+            </>
+          )}
           <button onClick={() => setTab('events')} className="px-4 py-2 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 text-white text-sm font-semibold rounded-lg transition-colors">
             Browse Events →
           </button>
@@ -316,20 +446,62 @@ function HomeTab({ myEvents, setTab }: { myEvents: number[]; setTab: (t: Tab) =>
 
 // ─── Events Tab ───────────────────────────────────────────────────────────────
 
-function EventsTab({ myEvents, setMyEvents, showToast }: { myEvents: number[]; setMyEvents: (e: number[]) => void; showToast: (msg: string) => void }) {
-  const signUp = (id: number) => { setMyEvents([...myEvents, id]); showToast('🎉 You\'re signed up!'); };
-  const pct    = (ev: typeof MOCK_EVENTS[0]) => Math.min(100, Math.round((ev.signups / ev.needed) * 100));
+function EventsTab({
+  events, signups, onSignup, onCancel, showToast,
+}: {
+  events: PortalEvent[];
+  signups: PortalSignup[];
+  onSignup: (eventId: string) => Promise<void>;
+  onCancel: (eventId: string) => Promise<void>;
+  showToast: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const handleSignup = async (id: string) => {
+    setBusy(id);
+    try {
+      await onSignup(id);
+      showToast('🎉 You\'re signed up!');
+    } catch (err) {
+      showToast(`❌ ${err instanceof Error ? err.message : 'Sign-up failed'}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    setBusy(id);
+    try {
+      await onCancel(id);
+      showToast('Signup cancelled');
+    } catch {
+      showToast('❌ Could not cancel signup');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!events.length) return (
+    <div className="text-center py-16 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-2xl bg-white dark:bg-neutral-800 mt-2">
+      <div className="text-4xl mb-3">📭</div>
+      <p className="font-semibold text-neutral-900 dark:text-neutral-100 mb-1">No events posted yet</p>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">Check back soon — your organization will post opportunities here.</p>
+    </div>
+  );
 
   return (
     <div>
       <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-1">Upcoming Events</h3>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Find and sign up for volunteer opportunities near you.</p>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Find and sign up for volunteer opportunities.</p>
 
-      {MOCK_EVENTS.map(ev => {
-        const signed    = myEvents.includes(ev.id);
-        const full      = ev.signups >= ev.needed && !signed;
-        const remaining = ev.needed - ev.signups;
-        const fillPct   = pct(ev);
+      {events.map(ev => {
+        const signed    = signups.some(s => s.event_id === ev.id);
+        const remaining = ev.spotsAvailable - ev.participantCount;
+        const full      = remaining <= 0 && !signed;
+        const fillPct   = Math.min(100, Math.round((ev.participantCount / Math.max(ev.spotsAvailable, 1)) * 100));
+        const { month, day } = parseEventDate(ev.startDate);
+        const time = formatEventTime(ev.startDate, ev.endDate);
+        const isBusy = busy === ev.id;
 
         return (
           <div
@@ -338,22 +510,23 @@ function EventsTab({ myEvents, setMyEvents, showToast }: { myEvents: number[]; s
               signed ? 'border-success-300 dark:border-success-700' : full ? 'border-neutral-200 dark:border-neutral-700 opacity-75' : 'border-neutral-200 dark:border-neutral-700'
             }`}
           >
-            {/* Top accent bar */}
             <div className={`absolute top-0 left-0 right-0 h-0.5 rounded-t-xl ${signed ? 'bg-gradient-to-r from-success-400 to-primary-400' : full ? 'bg-neutral-200 dark:bg-neutral-700' : 'bg-gradient-to-r from-primary-400 to-warning-400'}`} />
 
             <div className="flex gap-3 items-start mb-3">
-              <DateBlock month={ev.month} day={ev.day} muted={full} />
+              <DateBlock month={month} day={day} muted={full} />
               <div className="flex-1">
                 <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5">{ev.title}</p>
                 <div className="flex flex-wrap gap-2">
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {ev.time}</span>
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {ev.location}</span>
-                  <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-600">{ev.category}</span>
+                  {time && <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {time}</span>}
+                  {ev.location && <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {ev.location}</span>}
+                  {ev.category && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-600">{ev.category}</span>}
                 </div>
               </div>
             </div>
 
-            <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-4">{ev.desc}</p>
+            {ev.description && (
+              <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-4 line-clamp-2">{ev.description}</p>
+            )}
 
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex-1 min-w-[120px]">
@@ -362,18 +535,28 @@ function EventsTab({ myEvents, setMyEvents, showToast }: { myEvents: number[]; s
                 </p>
                 <div className="h-1.5 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all ${full ? 'bg-danger-400' : remaining > ev.needed * 0.4 ? 'bg-success-400' : 'bg-warning-400'}`}
+                    className={`h-full rounded-full transition-all ${full ? 'bg-danger-400' : remaining > ev.spotsAvailable * 0.4 ? 'bg-success-400' : 'bg-warning-400'}`}
                     style={{ width: `${fillPct}%` }}
                   />
                 </div>
               </div>
               {signed ? (
-                <span className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800">✓ Signed up</span>
+                <button
+                  onClick={() => handleCancel(ev.id)}
+                  disabled={isBusy}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800 hover:bg-danger-50 hover:text-danger-600 hover:border-danger-200 dark:hover:bg-danger-900/20 dark:hover:text-danger-400 dark:hover:border-danger-800 transition-colors disabled:opacity-60"
+                >
+                  {isBusy ? '…' : '✓ Signed up'}
+                </button>
               ) : full ? (
                 <span className="flex items-center gap-1 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs font-bold rounded-full">🔒 Full</span>
               ) : (
-                <button onClick={() => signUp(ev.id)} className="px-4 py-1.5 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 text-white text-xs font-semibold rounded-lg transition-colors">
-                  Sign Up
+                <button
+                  onClick={() => handleSignup(ev.id)}
+                  disabled={isBusy}
+                  className="px-4 py-1.5 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors"
+                >
+                  {isBusy ? 'Signing up…' : 'Sign Up'}
                 </button>
               )}
             </div>
@@ -386,18 +569,37 @@ function EventsTab({ myEvents, setMyEvents, showToast }: { myEvents: number[]; s
 
 // ─── My Events Tab ────────────────────────────────────────────────────────────
 
-function MyEventsTab({ myEvents, setMyEvents, showToast }: { myEvents: number[]; setMyEvents: (e: number[]) => void; showToast: (msg: string) => void }) {
+function MyEventsTab({
+  signups, onCancel, showToast,
+}: {
+  signups: PortalSignup[];
+  onCancel: (eventId: string) => Promise<void>;
+  showToast: (msg: string) => void;
+}) {
   const [subTab, setSubTab] = useState<'upcoming' | 'past'>('upcoming');
-  const upcomingList = MOCK_EVENTS.filter(e => myEvents.includes(e.id));
-  const cancel = (id: number) => { setMyEvents(myEvents.filter(e => e !== id)); showToast('Signup cancelled'); };
+  const [busy, setBusy]     = useState<string | null>(null);
+
+  const upcomingList = signups.filter(s => isUpcoming(s.start_date));
+  const pastList     = signups.filter(s => !isUpcoming(s.start_date));
+
+  const handleCancel = async (eventId: string) => {
+    setBusy(eventId);
+    try {
+      await onCancel(eventId);
+      showToast('Signup cancelled');
+    } catch {
+      showToast('❌ Could not cancel signup');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div>
       <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-3">My Events</h3>
 
-      {/* Sub-tabs */}
       <div className="flex gap-2 mb-4">
-        {([['upcoming', `Upcoming (${upcomingList.length})`], ['past', `Past (${PAST_EVENTS.length})`]] as const).map(([id, label]) => (
+        {([['upcoming', `Upcoming (${upcomingList.length})`], ['past', `Past (${pastList.length})`]] as const).map(([id, label]) => (
           <button
             key={id}
             onClick={() => setSubTab(id)}
@@ -420,75 +622,119 @@ function MyEventsTab({ myEvents, setMyEvents, showToast }: { myEvents: number[];
             <p className="text-sm text-neutral-500 dark:text-neutral-400">Browse available opportunities and sign up for events that interest you.</p>
           </div>
         ) : (
-          upcomingList.map(ev => (
-            <div key={ev.id} className="bg-white dark:bg-neutral-800 border border-success-200 dark:border-success-800 rounded-xl p-5 mb-3 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl bg-gradient-to-r from-success-400 to-primary-400" />
-              <div className="flex gap-3 items-start mb-3">
-                <DateBlock month={ev.month} day={ev.day} />
-                <div className="flex-1">
-                  <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5">{ev.title}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {ev.time}</span>
-                    <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {ev.location}</span>
+          upcomingList.map(s => {
+            const { month, day } = parseEventDate(s.start_date);
+            const time = formatEventTime(s.start_date, s.end_date);
+            return (
+              <div key={s.id} className="bg-white dark:bg-neutral-800 border border-success-200 dark:border-success-800 rounded-xl p-5 mb-3 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl bg-gradient-to-r from-success-400 to-primary-400" />
+                <div className="flex gap-3 items-start mb-3">
+                  <DateBlock month={month} day={day} />
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5">{s.title}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {time && <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {time}</span>}
+                      {s.location && <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {s.location}</span>}
+                    </div>
                   </div>
                 </div>
+                {s.description && <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-4 line-clamp-2">{s.description}</p>}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800">✓ You're going</span>
+                  <button
+                    onClick={() => handleCancel(s.event_id)}
+                    disabled={busy === s.event_id}
+                    className="px-3 py-1.5 border border-danger-200 dark:border-danger-800 text-danger-600 dark:text-danger-400 text-xs font-semibold rounded-lg hover:bg-danger-50 dark:hover:bg-danger-900/20 transition-colors disabled:opacity-60"
+                  >
+                    {busy === s.event_id ? '…' : 'Cancel signup'}
+                  </button>
+                </div>
               </div>
-              <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-4">{ev.desc}</p>
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800">✓ You're going</span>
-                <button onClick={() => cancel(ev.id)} className="px-3 py-1.5 border border-danger-200 dark:border-danger-800 text-danger-600 dark:text-danger-400 text-xs font-semibold rounded-lg hover:bg-danger-50 dark:hover:bg-danger-900/20 transition-colors">
-                  Cancel signup
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )
       )}
 
-      {subTab === 'past' && PAST_EVENTS.map(ev => (
-        <div key={ev.id} className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-5 mb-3 shadow-sm relative overflow-hidden opacity-80">
-          <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl bg-neutral-200 dark:bg-neutral-700" />
-          <div className="flex gap-3 items-start mb-3">
-            <DateBlock month={ev.month} day={ev.day} muted />
-            <div className="flex-1">
-              <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5">{ev.title}</p>
-              <div className="flex flex-wrap gap-2">
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {ev.time}</span>
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {ev.location}</span>
-              </div>
-            </div>
+      {subTab === 'past' && (
+        pastList.length === 0 ? (
+          <div className="text-center py-12 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-2xl bg-white dark:bg-neutral-800">
+            <div className="text-4xl mb-3">📋</div>
+            <p className="font-semibold text-neutral-900 dark:text-neutral-100 mb-1">No past events yet</p>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">Your completed events will appear here.</p>
           </div>
-          <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-3">{ev.desc}</p>
-          <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs font-bold rounded-full border border-neutral-200 dark:border-neutral-600">
-            ✓ Completed · {ev.hours}h
-          </span>
-        </div>
-      ))}
+        ) : (
+          pastList.map(s => {
+            const { month, day } = parseEventDate(s.start_date);
+            const time = formatEventTime(s.start_date, s.end_date);
+            return (
+              <div key={s.id} className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-5 mb-3 shadow-sm relative overflow-hidden opacity-80">
+                <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl bg-neutral-200 dark:bg-neutral-700" />
+                <div className="flex gap-3 items-start mb-3">
+                  <DateBlock month={month} day={day} muted />
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5">{s.title}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {time && <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {time}</span>}
+                      {s.location && <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {s.location}</span>}
+                    </div>
+                  </div>
+                </div>
+                {s.description && <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-3 line-clamp-2">{s.description}</p>}
+                <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs font-bold rounded-full border border-neutral-200 dark:border-neutral-600">
+                  ✓ Completed
+                </span>
+              </div>
+            );
+          })
+        )
+      )}
     </div>
   );
 }
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
-function ProfileTab({ showToast }: { showToast: (msg: string) => void }) {
-  const [form, setForm]       = useState({ name: MOCK_VOLUNTEER.name, email: MOCK_VOLUNTEER.email, phone: MOCK_VOLUNTEER.phone });
+function ProfileTab({ profile, onProfileUpdate, showToast }: {
+  profile: VolunteerProfile;
+  onProfileUpdate: (updated: VolunteerProfile) => void;
+  showToast: (msg: string) => void;
+}) {
+  const [form, setForm]       = useState({ firstName: profile.firstName, lastName: profile.lastName, phone: profile.phone });
   const [pwForm, setPwForm]   = useState({ current: '', next: '', confirm: '' });
   const [showPws, setShowPws] = useState({ current: false, next: false, confirm: false });
   const [saving, setSaving]   = useState(false);
+  const [savingPw, setSavingPw] = useState(false);
 
   const set   = (k: string) => (v: string) => setForm(f => ({ ...f, [k]: v }));
   const setPw = (k: string) => (v: string) => setPwForm(f => ({ ...f, [k]: v }));
 
-  const save = () => {
+  const save = async () => {
     setSaving(true);
-    setTimeout(() => { setSaving(false); showToast('✅ Profile saved!'); }, 900);
+    try {
+      await portalApi.put('/portal/profile', { firstName: form.firstName, lastName: form.lastName, phone: form.phone });
+      onProfileUpdate({ ...profile, firstName: form.firstName, lastName: form.lastName, name: `${form.firstName} ${form.lastName}`.trim(), phone: form.phone });
+      showToast('✅ Profile saved!');
+    } catch (err) {
+      showToast(`❌ ${err instanceof Error ? err.message : 'Failed to save'}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const changePw = () => {
+  const changePw = async () => {
     if (!pwForm.current) return showToast('❌ Enter your current password.');
     if (pwForm.next.length < 8) return showToast('❌ New password must be at least 8 characters.');
     if (pwForm.next !== pwForm.confirm) return showToast('❌ Passwords don\'t match.');
-    showToast('✅ Password updated!');
+    setSavingPw(true);
+    try {
+      await portalApi.put('/auth/password', { currentPassword: pwForm.current, newPassword: pwForm.next });
+      setPwForm({ current: '', next: '', confirm: '' });
+      showToast('✅ Password updated!');
+    } catch (err) {
+      showToast(`❌ ${err instanceof Error ? err.message : 'Failed to update password'}`);
+    } finally {
+      setSavingPw(false);
+    }
   };
 
   return (
@@ -497,15 +743,14 @@ function ProfileTab({ showToast }: { showToast: (msg: string) => void }) {
       <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 mb-4 shadow-sm flex flex-col items-center text-center">
         <div className="relative mb-4">
           <div className="w-20 h-20 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center text-primary-700 dark:text-primary-300 font-bold text-2xl border-3 border-white dark:border-neutral-800 shadow-sm">
-            {MOCK_VOLUNTEER.initials}
-          </div>
-          <div className="absolute bottom-0 right-0 w-6 h-6 bg-neutral-800 dark:bg-neutral-700 rounded-full flex items-center justify-center cursor-pointer border-2 border-white dark:border-neutral-800 text-[11px]">
-            ✏️
+            {getInitials(profile.name)}
           </div>
         </div>
-        <p className="text-lg font-bold text-neutral-900 dark:text-neutral-100">{form.name}</p>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">{form.email}</p>
-        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 font-medium">Volunteer since {MOCK_VOLUNTEER.since}</p>
+        <p className="text-lg font-bold text-neutral-900 dark:text-neutral-100">{profile.name}</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">{profile.email}</p>
+        {profile.joinDate && (
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 font-medium">Volunteer since {formatJoinDate(profile.joinDate)}</p>
+        )}
       </div>
 
       {/* Personal info */}
@@ -513,17 +758,22 @@ function ProfileTab({ showToast }: { showToast: (msg: string) => void }) {
         <p className="text-sm font-bold text-neutral-900 dark:text-neutral-100 mb-4">Personal Information</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="block text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">Full Name</label>
-            <input className={inputCls} value={form.name} onChange={e => set('name')(e.target.value)} />
+            <label className="block text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">First Name</label>
+            <input className={inputCls} value={form.firstName} onChange={e => set('firstName')(e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">Phone (optional)</label>
-            <input className={inputCls} value={form.phone} onChange={e => set('phone')(e.target.value)} placeholder="(555) 000-0000" />
+            <label className="block text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">Last Name</label>
+            <input className={inputCls} value={form.lastName} onChange={e => set('lastName')(e.target.value)} />
           </div>
+        </div>
+        <div className="mb-3">
+          <label className="block text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">Phone (optional)</label>
+          <input className={inputCls} value={form.phone} onChange={e => set('phone')(e.target.value)} placeholder="(555) 000-0000" />
         </div>
         <div className="mb-4">
           <label className="block text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-1.5">Email Address</label>
-          <input className={inputCls} type="email" value={form.email} onChange={e => set('email')(e.target.value)} />
+          <input className={`${inputCls} opacity-60 cursor-not-allowed`} type="email" value={profile.email} readOnly />
+          <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">Email cannot be changed here. Contact your organization to update it.</p>
         </div>
         <button onClick={save} disabled={saving} className="w-full py-2.5 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
           {saving ? 'Saving…' : 'Save Changes'}
@@ -553,8 +803,8 @@ function ProfileTab({ showToast }: { showToast: (msg: string) => void }) {
             </div>
           );
         })}
-        <button onClick={changePw} className="w-full py-2.5 border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 text-sm font-semibold rounded-lg transition-colors mt-1">
-          Update Password
+        <button onClick={changePw} disabled={savingPw} className="w-full py-2.5 border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 disabled:opacity-60 text-sm font-semibold rounded-lg transition-colors mt-1">
+          {savingPw ? 'Updating…' : 'Update Password'}
         </button>
       </div>
     </div>
@@ -563,28 +813,85 @@ function ProfileTab({ showToast }: { showToast: (msg: string) => void }) {
 
 // ─── Dashboard Shell ──────────────────────────────────────────────────────────
 
-function Dashboard({ onLogout }: { onLogout: () => void }) {
+function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerProfile; onLogout: () => void }) {
   const [tab, setTab]         = useState<Tab>('home');
-  const [myEvents, setMyEvents] = useState<number[]>([1]);
+  const [profile, setProfile] = useState(initialProfile);
+  const [events, setEvents]   = useState<PortalEvent[]>([]);
+  const [signups, setSignups] = useState<PortalSignup[]>([]);
+  const [loading, setLoading] = useState(true);
   const [toast, setToast]     = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+    setTimeout(() => setToast(null), 2800);
   };
+
+  // Load events + signups on mount
+  useEffect(() => {
+    let cancelled = false;
+    Promise.allSettled([
+      portalApi.get<PortalEvent[]>('/portal/events'),
+      portalApi.get<PortalSignup[]>('/portal/my-signups'),
+    ]).then(([evResult, signupResult]) => {
+      if (cancelled) return;
+      if (evResult.status === 'fulfilled') setEvents(evResult.value ?? []);
+      if (signupResult.status === 'fulfilled') setSignups(signupResult.value ?? []);
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleSignup = useCallback(async (eventId: string) => {
+    await portalApi.post('/portal/signup', { eventId });
+    // Optimistically update signups list
+    const ev = events.find(e => e.id === eventId);
+    if (ev) {
+      const newSignup: PortalSignup = {
+        id: crypto.randomUUID(),
+        event_id: eventId,
+        status: 'APPROVED',
+        title: ev.title,
+        start_date: ev.startDate,
+        end_date: ev.endDate,
+        location: ev.location,
+        category: ev.category,
+        description: ev.description,
+      };
+      setSignups(prev => [...prev, newSignup]);
+      setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participantCount: e.participantCount + 1 } : e));
+    }
+  }, [events]);
+
+  const handleCancel = useCallback(async (eventId: string) => {
+    await portalApi.delete(`/portal/signup/${eventId}`);
+    setSignups(prev => prev.filter(s => s.event_id !== eventId));
+    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participantCount: Math.max(0, e.participantCount - 1) } : e));
+  }, []);
+
+  const upcomingSignupCount = signups.filter(s => isUpcoming(s.start_date)).length;
+
+  if (loading) return (
+    <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950">
+      <div className="h-14 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-700 sticky top-0 z-50" />
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center text-neutral-400 dark:text-neutral-500">
+          <div className="w-8 h-8 border-2 border-primary-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm">Loading your portal…</p>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950">
-      <TopBar onLogout={onLogout} />
+      <TopBar profile={profile} onLogout={onLogout} />
       <div className="flex-1 px-5 py-6 pb-24 max-w-2xl mx-auto w-full">
-        {tab === 'home'      && <HomeTab myEvents={myEvents} setTab={setTab} />}
-        {tab === 'events'    && <EventsTab myEvents={myEvents} setMyEvents={setMyEvents} showToast={showToast} />}
-        {tab === 'myevents'  && <MyEventsTab myEvents={myEvents} setMyEvents={setMyEvents} showToast={showToast} />}
-        {tab === 'profile'   && <ProfileTab showToast={showToast} />}
+        {tab === 'home'     && <HomeTab profile={profile} signups={signups} events={events} setTab={setTab} />}
+        {tab === 'events'   && <EventsTab events={events} signups={signups} onSignup={handleSignup} onCancel={handleCancel} showToast={showToast} />}
+        {tab === 'myevents' && <MyEventsTab signups={signups} onCancel={handleCancel} showToast={showToast} />}
+        {tab === 'profile'  && <ProfileTab profile={profile} onProfileUpdate={setProfile} showToast={showToast} />}
       </div>
-      <BottomNav tab={tab} setTab={setTab} myCount={myEvents.length} />
+      <BottomNav tab={tab} setTab={setTab} myCount={upcomingSignupCount} />
 
-      {/* Toast */}
       {toast && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-neutral-900 dark:bg-neutral-700 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-xl whitespace-nowrap z-[200]">
           {toast}
@@ -597,13 +904,30 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function VolunteerPortal() {
-  const [authed, setAuthed] = useState(false);
+  const [profile, setProfile] = useState<VolunteerProfile | null>(null);
+
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    const token = localStorage.getItem(VP_TOKEN_KEY);
+    if (!token) return;
+    portalApi.get<VolunteerProfile>('/portal/profile')
+      .then(setProfile)
+      .catch(() => {
+        localStorage.removeItem(VP_TOKEN_KEY);
+      });
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem(VP_TOKEN_KEY);
+    setProfile(null);
+  };
+
   return (
     <>
       <Head><title>Volunteer Portal — VolunteerFlow</title></Head>
-      {authed
-        ? <Dashboard onLogout={() => setAuthed(false)} />
-        : <LoginPage onLogin={() => setAuthed(true)} />
+      {profile
+        ? <Dashboard profile={profile} onLogout={handleLogout} />
+        : <LoginPage onLogin={setProfile} />
       }
     </>
   );

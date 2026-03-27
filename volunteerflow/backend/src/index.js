@@ -3128,6 +3128,141 @@ app.put('/api/portal/settings/:type', requireAuth, async (req, res) => {
   }
 });
 
+// ── Volunteer Portal (authenticated volunteer-facing API) ──────────────────────
+
+app.get('/api/portal/events', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT e.*,
+         (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'APPROVED') AS participant_count,
+         0 AS application_count
+       FROM events e
+       WHERE e.org_id = $1 AND e.status NOT IN ('DRAFT','CANCELLED')
+       ORDER BY e.start_date ASC NULLS LAST`,
+      [req.orgId]
+    );
+    res.json({ success: true, data: rows.map(mapEvent) });
+  } catch (err) {
+    console.error('GET /api/portal/events error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch events' });
+  }
+});
+
+app.get('/api/portal/profile', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Volunteer profile not found' });
+    const v = rows[0];
+    res.json({ success: true, data: {
+      id: v.id,
+      firstName: v.first_name,
+      lastName: v.last_name,
+      name: `${v.first_name} ${v.last_name}`.trim(),
+      email: v.email,
+      phone: v.phone || '',
+      joinDate: v.join_date || v.created_at,
+      hoursContributed: v.hours_contributed || 0,
+      status: v.status,
+    }});
+  } catch (err) {
+    console.error('GET /api/portal/profile error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch profile' });
+  }
+});
+
+app.put('/api/portal/profile', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { firstName, lastName, phone } = req.body;
+    const { rows } = await pool.query(
+      'SELECT id FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Volunteer profile not found' });
+    await pool.query(
+      `UPDATE volunteers SET
+         first_name = COALESCE($1, first_name),
+         last_name  = COALESCE($2, last_name),
+         phone      = COALESCE($3, phone)
+       WHERE id = $4`,
+      [firstName || null, lastName || null, phone ?? null, rows[0].id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('PUT /api/portal/profile error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to update profile' });
+  }
+});
+
+app.get('/api/portal/my-signups', requireAuth, async (req, res) => {
+  try {
+    const { rows: volRows } = await pool.query(
+      'SELECT id FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!volRows.length) return res.json({ success: true, data: [] });
+    const { rows } = await pool.query(
+      `SELECT a.id, a.event_id, a.status, a.created_at,
+              e.title, e.start_date, e.end_date, e.location, e.category, e.description
+       FROM applications a
+       JOIN events e ON e.id = a.event_id
+       WHERE a.volunteer_id = $1 AND a.org_id = $2
+       ORDER BY e.start_date DESC`,
+      [volRows[0].id, req.orgId]
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('GET /api/portal/my-signups error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch signups' });
+  }
+});
+
+app.post('/api/portal/signup', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { eventId } = req.body;
+    if (!eventId) return res.status(400).json({ success: false, error: 'eventId required' });
+    const { rows: volRows } = await pool.query(
+      'SELECT id FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!volRows.length) return res.status(404).json({ success: false, error: 'Volunteer profile not found' });
+    const { rows: existing } = await pool.query(
+      'SELECT id FROM applications WHERE volunteer_id = $1 AND event_id = $2',
+      [volRows[0].id, eventId]
+    );
+    if (existing.length) return res.status(409).json({ success: false, error: 'Already signed up for this event' });
+    const id = crypto.randomUUID();
+    await pool.query(
+      'INSERT INTO applications (id, org_id, volunteer_id, event_id, status) VALUES ($1, $2, $3, $4, $5)',
+      [id, req.orgId, volRows[0].id, eventId, 'APPROVED']
+    );
+    res.status(201).json({ success: true, data: { id } });
+  } catch (err) {
+    console.error('POST /api/portal/signup error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to sign up' });
+  }
+});
+
+app.delete('/api/portal/signup/:eventId', requireAuth, async (req, res) => {
+  try {
+    const { rows: volRows } = await pool.query(
+      'SELECT id FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!volRows.length) return res.status(404).json({ success: false, error: 'Volunteer profile not found' });
+    await pool.query(
+      'DELETE FROM applications WHERE volunteer_id = $1 AND event_id = $2 AND org_id = $3',
+      [volRows[0].id, req.params.eventId, req.orgId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/portal/signup error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to cancel signup' });
+  }
+});
+
 // ── Org Settings ──────────────────────────────────────────────────────────────
 
 /** Fetch the org_settings row for a given org. Falls back to 'default' for legacy installs. */
