@@ -59,9 +59,23 @@ async function sendEmail(to, subject, body, from) {
 // ── SMS ───────────────────────────────────────────────────────────────────────
 
 /**
+ * Normalize a phone number to E.164 format for Twilio.
+ * Handles US numbers in formats like (555) 555-5555, 555-555-5555, 5555555555.
+ * Numbers already in E.164 (+1...) are passed through unchanged.
+ */
+function toE164(phone) {
+  if (!phone) return phone;
+  const digits = phone.replace(/\D/g, '');
+  if (phone.trim().startsWith('+')) return phone.trim(); // already E.164
+  if (digits.length === 10) return `+1${digits}`;        // US 10-digit
+  if (digits.length === 11 && digits[0] === '1') return `+${digits}`; // US with country code
+  return phone; // unknown format — pass through and let Twilio error
+}
+
+/**
  * Send a single SMS via Twilio.
  *
- * @param {string} to   E.164 phone number, e.g. +12125551234
+ * @param {string} to   Phone number (any common US format or E.164)
  * @param {string} body Message text (≤160 chars for single segment)
  */
 async function sendSms(to, body) {
@@ -70,7 +84,8 @@ async function sendSms(to, body) {
     console.log(`[Mailer] SMS (Twilio not configured) → ${to} | ${body.slice(0, 50)}`);
     return;
   }
-  await twilioClient.messages.create({ from: TWILIO_PHONE_NUMBER, to, body });
+  const normalized = toE164(to);
+  await twilioClient.messages.create({ from: TWILIO_PHONE_NUMBER, to: normalized, body });
 }
 
 // ── Bulk dispatch ─────────────────────────────────────────────────────────────
