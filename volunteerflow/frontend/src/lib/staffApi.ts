@@ -40,11 +40,13 @@ async function staffFetch(path: string, init: RequestInit = {}): Promise<unknown
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
 
   if (res.status === 401) {
-    // Clear ONLY staff auth state — never touch vf_token or vf_user
-    localStorage.removeItem('vf_staff_token');
-    localStorage.removeItem('vf_staff_user');
-    window.location.href = '/staff/login';
-    return;
+    // Only redirect if we had a token (session expired), not during login itself
+    if (token) {
+      localStorage.removeItem('vf_staff_token');
+      localStorage.removeItem('vf_staff_user');
+      window.location.href = '/staff/login';
+      return;
+    }
   }
 
   const data = await res.json().catch(() => ({}));
