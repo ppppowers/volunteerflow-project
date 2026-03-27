@@ -54,7 +54,7 @@ const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const { pool, initializeDatabase, seedOrgMessageTemplates } = require('./db');
-const { dispatchBulk, dispatchJobNotif, buildFrom } = require('./mailer');
+const { dispatchBulk, dispatchJobNotif, buildFrom, sendEmail } = require('./mailer');
 const createStaffRouter = require('./staff/index');
 
 // ── Supabase Storage client ───────────────────────────────────────────────────
@@ -2606,6 +2606,29 @@ app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
           [volId, req.orgId, firstName, lastName, email,
            sub.phone || '', new Date().toISOString().slice(0, 10)]
         );
+
+        // Send approval email with portal sign-up link (fire-and-forget)
+        getOrgSettings(req.orgId).then((orgCfg) => {
+          const orgName    = (orgCfg?.org_name || orgCfg?.email_from_name || 'Your Organization').trim();
+          const emailFrom  = buildFrom(orgCfg);
+          const portalUrl  = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '') + '/volunteerportal';
+          const subject    = `You're approved — welcome to ${orgName}!`;
+          const body       =
+`Hi ${firstName || 'there'},
+
+Great news — your volunteer application has been approved by ${orgName}!
+
+You can now access your volunteer portal to view upcoming events, track your hours, and more.
+
+Get started by visiting the link below and creating your password:
+${portalUrl}
+
+We're excited to have you on the team.
+
+– The ${orgName} Team`;
+          return sendEmail(email, subject, body, emailFrom);
+        }).catch((err) => console.error('Approval email error:', err.message));
+
       } catch (volErr) {
         console.error('Could not create volunteer record on approval:', volErr.message);
         // Non-fatal — submission is still approved
