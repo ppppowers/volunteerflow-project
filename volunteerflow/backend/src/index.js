@@ -2607,25 +2607,51 @@ app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
            sub.phone || '', new Date().toISOString().slice(0, 10)]
         );
 
-        // Send approval email with portal sign-up link (fire-and-forget)
-        getOrgSettings(req.orgId).then((orgCfg) => {
-          const orgName    = (orgCfg?.org_name || orgCfg?.email_from_name || 'Your Organization').trim();
-          const emailFrom  = buildFrom(orgCfg);
-          const portalUrl  = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '') + '/volunteerportal';
-          const subject    = `You're approved — welcome to ${orgName}!`;
-          const body       =
-`Hi ${firstName || 'there'},
+        // Send approval email — use org's customized template if available (fire-and-forget)
+        Promise.all([
+          getOrgSettings(req.orgId),
+          pool.query(
+            `SELECT subject, body FROM message_templates WHERE id = $1 AND org_id = $2 LIMIT 1`,
+            [`tpl_application_approved_${req.orgId}`, req.orgId]
+          ),
+        ]).then(([orgCfg, tplRes]) => {
+          const orgName   = (orgCfg?.org_name || orgCfg?.email_from_name || 'Your Organization').trim();
+          const emailFrom = buildFrom(orgCfg);
+          const portalUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '') + '/volunteerportal';
+          const volName   = `${firstName} ${lastName}`.trim() || 'there';
 
-Great news — your volunteer application has been approved by ${orgName}!
+          let subject, body;
+          if (tplRes.rows.length) {
+            subject = tplRes.rows[0].subject;
+            body    = tplRes.rows[0].body;
+          } else {
+            subject = `You're approved! Welcome to the team — ${orgName}`;
+            body    =
+`Hi [Volunteer Name],
 
-You can now access your volunteer portal to view upcoming events, track your hours, and more.
+Great news — your volunteer application has been approved! Welcome to the [Organization Name] family.
 
-Get started by visiting the link below and creating your password:
-${portalUrl}
+Access your volunteer portal here to set up your account and get started:
+[Portal Link]
 
-We're excited to have you on the team.
+Next steps:
+• Create your password using the link above
+• Browse upcoming events and sign up for shifts
+• Connect with our volunteer coordinator for any questions
 
-– The ${orgName} Team`;
+We're excited to have you on board.
+
+See you soon,
+[Organization Name] Team`;
+          }
+
+          // Substitute placeholders
+          subject = subject.replace(/\[Organization Name\]/gi, orgName);
+          body    = body
+            .replace(/\[Volunteer Name\]/gi, volName)
+            .replace(/\[Organization Name\]/gi, orgName)
+            .replace(/\[Portal Link\]/gi, portalUrl);
+
           return sendEmail(email, subject, body, emailFrom);
         }).catch((err) => console.error('Approval email error:', err.message));
 

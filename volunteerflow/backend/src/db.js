@@ -685,8 +685,11 @@ Best,
 
 Great news — your volunteer application has been approved! Welcome to the [Organization Name] family.
 
+Access your volunteer portal here to set up your account and get started:
+[Portal Link]
+
 Next steps:
-• Complete any required training or onboarding materials
+• Create your password using the link above
 • Browse upcoming events and sign up for shifts
 • Connect with our volunteer coordinator for any questions
 

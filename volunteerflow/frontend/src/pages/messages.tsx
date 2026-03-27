@@ -514,9 +514,14 @@ function TemplatesTab({
             <Card key={t.id} className="p-4 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <ChannelBadge channel={t.channel} />
                     <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">{t.name}</span>
+                    {t.name === 'Application Approved' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 whitespace-nowrap">
+                        Auto-sent on approval
+                      </span>
+                    )}
                   </div>
                   {t.subject && (
                     <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate mb-1">{t.subject}</p>
