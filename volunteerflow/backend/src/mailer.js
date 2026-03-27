@@ -111,6 +111,7 @@ function buildFrom(settings) {
 async function dispatchBulk(channel, recipients, subject, body, emailFrom) {
   let sent = 0;
   let failed = 0;
+  const errors = [];
   for (const r of recipients) {
     try {
       if (channel === 'sms') {
@@ -121,10 +122,11 @@ async function dispatchBulk(channel, recipients, subject, body, emailFrom) {
       sent++;
     } catch (err) {
       console.error(`[Mailer] Failed → ${r.email || r.phone}:`, err.message);
+      errors.push(`${r.email || r.phone}: ${err.message}`);
       failed++;
     }
   }
-  return { sent, failed };
+  return { sent, failed, errors };
 }
 
 // ── Job notifications ─────────────────────────────────────────────────────────

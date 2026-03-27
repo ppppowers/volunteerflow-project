@@ -3886,9 +3886,13 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
     const orgSettings  = await getOrgSettings(req.orgId);
     const emailFrom    = buildFrom(orgSettings);
 
+    console.log(`[Messages] Sending ${channel || 'email'} to ${recipientRows.length} recipient(s), from="${emailFrom}"`);
+
     // Dispatch messages via Resend / Twilio (or log if not configured)
-    const { sent, failed } = await dispatchBulk(channel || 'email', recipientRows, subject || '', body, emailFrom);
+    const { sent, failed, errors } = await dispatchBulk(channel || 'email', recipientRows, subject || '', body, emailFrom);
     const finalStatus = failed === 0 ? 'delivered' : sent === 0 ? 'failed' : 'partial';
+
+    if (errors.length) console.error('[Messages] Dispatch errors:', errors);
 
     // Record in DB
     const id = 'msg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -3899,7 +3903,7 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
     logAudit({ req, category: 'message', verb: 'sent',
       resource: `${(channel || 'email').toUpperCase()} Blast`,
       detail: `Sent to ${sent} recipient${sent !== 1 ? 's' : ''} — "${(subject || body).slice(0, 60)}"` });
-    res.json(mapSentMessage(rows[0]));
+    res.json({ ...mapSentMessage(rows[0]), recipientsFound: recipientRows.length, errors });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -199,7 +199,7 @@ function ComposeTab({
     if (recipientMode === 'select' && selectedVolunteers.length === 0) return;
     setSending(true);
     try {
-      const result = await api.post<SentMessage>('/messages/send', {
+      const result = await api.post<SentMessage & { recipientsFound?: number; errors?: string[] }>('/messages/send', {
         channel,
         subject: channel === 'email' ? subject : body.slice(0, 60),
         body,
@@ -207,10 +207,16 @@ function ComposeTab({
         eventId: recipientMode === 'event' ? selectedEvent : undefined,
         volunteerIds: recipientMode === 'select' ? selectedVolunteers : undefined,
       });
-      onSend(result);
-      setSubject('');
-      setBody('');
-      setTemplateId('');
+      if (result.recipientsFound === 0) {
+        toast.error('No recipients found — volunteer may have no email/phone on record');
+      } else if (result.errors && result.errors.length > 0) {
+        toast.error(`Send failed: ${result.errors[0]}`);
+      } else {
+        onSend(result);
+        setSubject('');
+        setBody('');
+        setTemplateId('');
+      }
     } catch {
       toast.error('Failed to send message');
     } finally {
