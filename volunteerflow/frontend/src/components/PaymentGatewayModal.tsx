@@ -132,8 +132,8 @@ export default function PaymentGatewayModal({
                   );
                   return actions.subscription.create({ plan_id: planId });
                 }}
-                onApprove={(data) => {
-                  onPayPalApprove(data as { subscriptionID: string | null });
+                onApprove={async (data) => {
+                  await onPayPalApprove(data as { subscriptionID: string | null });
                   onClose();
                 }}
                 onError={() => {
