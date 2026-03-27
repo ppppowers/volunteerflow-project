@@ -3743,7 +3743,12 @@ app.delete('/api/team/:id', requireAuth, writeLimiter, async (req, res) => {
 
 app.get('/api/messages/templates', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM message_templates WHERE org_id = $1 ORDER BY created_at ASC', [req.orgId]);
+    let { rows } = await pool.query('SELECT * FROM message_templates WHERE org_id = $1 ORDER BY created_at ASC', [req.orgId]);
+    if (rows.length === 0) {
+      await seedOrgMessageTemplates(req.orgId);
+      const result = await pool.query('SELECT * FROM message_templates WHERE org_id = $1 ORDER BY created_at ASC', [req.orgId]);
+      rows = result.rows;
+    }
     res.json(rows.map(mapTemplate));
   } catch (err) {
     res.status(500).json({ error: err.message });
