@@ -1,6 +1,6 @@
 // Shared signup form config — read by /signup page and mutated by SignupFormBuilder
 
-export type FieldType = 'text' | 'email' | 'tel' | 'textarea' | 'select' | 'checkbox' | 'date' | 'image';
+export type FieldType = 'text' | 'email' | 'tel' | 'textarea' | 'select' | 'checkbox' | 'date' | 'image' | 'password';
 
 export interface FormFieldOption {
   value: string;
@@ -43,6 +43,7 @@ const VOLUNTEER_FIELDS: FormField[] = [
   { id: 'motivation',        type: 'textarea', label: 'Why do you want to volunteer?',placeholder: 'Tell us what motivates you…',             required: false, enabled: true },
   { id: 'emergency_contact', type: 'text',     label: 'Emergency Contact',            placeholder: 'Name and phone number',      required: false, enabled: true },
   { id: 'terms',             type: 'checkbox', label: 'I agree to the terms and conditions', placeholder: undefined,              required: true,  enabled: true },
+  { id: 'password',          type: 'password', label: 'Create a Password',                  placeholder: 'At least 8 characters',     required: true,  enabled: true },
 ];
 
 const MEMBER_FIELDS: FormField[] = [

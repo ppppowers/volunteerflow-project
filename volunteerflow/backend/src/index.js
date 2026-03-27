@@ -2595,16 +2595,22 @@ app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
         const lastName  = nameParts.slice(1).join(' ') || '';
         const email     = sub.email.trim().toLowerCase();
         const volId     = generateId();
+        // Hash password from signup form if volunteer provided one
+        const rawPassword = (sub.answers && sub.answers.password) ? sub.answers.password : null;
+        const passwordHash = rawPassword && rawPassword.length >= 8
+          ? await bcrypt.hash(rawPassword, 12)
+          : null;
         await pool.query(
-          `INSERT INTO volunteers (id, org_id, first_name, last_name, email, phone, status, join_date)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+          `INSERT INTO volunteers (id, org_id, first_name, last_name, email, phone, status, join_date, password_hash)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8)
            ON CONFLICT (email, org_id) DO UPDATE SET
-             first_name = EXCLUDED.first_name,
-             last_name  = EXCLUDED.last_name,
-             phone      = COALESCE(NULLIF(EXCLUDED.phone, ''), volunteers.phone),
-             status     = 'active'`,
+             first_name    = EXCLUDED.first_name,
+             last_name     = EXCLUDED.last_name,
+             phone         = COALESCE(NULLIF(EXCLUDED.phone, ''), volunteers.phone),
+             status        = 'active',
+             password_hash = COALESCE(EXCLUDED.password_hash, volunteers.password_hash)`,
           [volId, req.orgId, firstName, lastName, email,
-           sub.phone || '', new Date().toISOString().slice(0, 10)]
+           sub.phone || '', new Date().toISOString().slice(0, 10), passwordHash]
         );
 
         // Send approval email — use org's customized template if available (fire-and-forget)
@@ -2631,11 +2637,11 @@ app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
 
 Great news — your volunteer application has been approved! Welcome to the [Organization Name] family.
 
-Access your volunteer portal here to set up your account and get started:
+Access your volunteer portal here to get started:
 [Portal Link]
 
 Next steps:
-• Create your password using the link above
+• Sign in using the email and password you provided when you applied
 • Browse upcoming events and sign up for shifts
 • Connect with our volunteer coordinator for any questions
 
@@ -3259,6 +3265,30 @@ app.put('/api/portal/settings/:type', requireAuth, async (req, res) => {
 
 // ── Volunteer Portal (authenticated volunteer-facing API) ──────────────────────
 
+// Helper: attach real signedUp counts to shifts for a set of event rows
+async function withShiftCounts(rows, orgId) {
+  if (!rows.length) return [];
+  const eventIds = rows.map(r => r.id);
+  const { rows: shiftRows } = await pool.query(
+    `SELECT event_id, shift_id, COUNT(*) AS cnt
+     FROM applications
+     WHERE org_id = $1 AND event_id = ANY($2) AND shift_id IS NOT NULL AND status = 'APPROVED'
+     GROUP BY event_id, shift_id`,
+    [orgId, eventIds]
+  );
+  const shiftCounts = {};
+  for (const row of shiftRows) {
+    if (!shiftCounts[row.event_id]) shiftCounts[row.event_id] = {};
+    shiftCounts[row.event_id][row.shift_id] = parseInt(row.cnt, 10);
+  }
+  return rows.map(r => {
+    const ev = mapEvent(r);
+    const counts = shiftCounts[ev.id] || {};
+    ev.shifts = (ev.shifts ?? []).map(s => ({ ...s, signedUp: counts[s.id] ?? s.signedUp ?? 0 }));
+    return ev;
+  });
+}
+
 app.get('/api/portal/events', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -3266,14 +3296,36 @@ app.get('/api/portal/events', requireAuth, async (req, res) => {
          (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'APPROVED') AS participant_count,
          0 AS application_count
        FROM events e
-       WHERE e.org_id = $1 AND e.status NOT IN ('DRAFT','CANCELLED')
+       WHERE e.org_id = $1
+         AND e.status NOT IN ('DRAFT','CANCELLED')
+         AND (e.start_date IS NULL OR e.start_date >= NOW() - INTERVAL '1 day')
        ORDER BY e.start_date ASC NULLS LAST`,
       [req.orgId]
     );
-    res.json({ success: true, data: rows.map(mapEvent) });
+    const events = await withShiftCounts(rows, req.orgId);
+    res.json({ success: true, data: events });
   } catch (err) {
     console.error('GET /api/portal/events error:', err.message);
     res.status(500).json({ success: false, error: 'Failed to fetch events' });
+  }
+});
+
+app.get('/api/portal/events/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT e.*,
+         (SELECT COUNT(*) FROM applications a WHERE a.event_id = e.id AND a.status = 'APPROVED') AS participant_count,
+         0 AS application_count
+       FROM events e
+       WHERE e.id = $1 AND e.org_id = $2`,
+      [req.params.id, req.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Event not found' });
+    const [event] = await withShiftCounts(rows, req.orgId);
+    res.json({ success: true, data: event });
+  } catch (err) {
+    console.error('GET /api/portal/events/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch event' });
   }
 });
 
@@ -3333,7 +3385,7 @@ app.get('/api/portal/my-signups', requireAuth, async (req, res) => {
     );
     if (!volRows.length) return res.json({ success: true, data: [] });
     const { rows } = await pool.query(
-      `SELECT a.id, a.event_id, a.status, a.created_at,
+      `SELECT a.id, a.event_id, a.shift_id, a.status, a.created_at,
               e.title, e.start_date, e.end_date, e.location, e.category, e.description
        FROM applications a
        JOIN events e ON e.id = a.event_id
@@ -3350,22 +3402,28 @@ app.get('/api/portal/my-signups', requireAuth, async (req, res) => {
 
 app.post('/api/portal/signup', requireAuth, writeLimiter, async (req, res) => {
   try {
-    const { eventId } = req.body;
+    const { eventId, shiftId } = req.body;
     if (!eventId) return res.status(400).json({ success: false, error: 'eventId required' });
     const { rows: volRows } = await pool.query(
       'SELECT id FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
       [req.user.email, req.orgId]
     );
     if (!volRows.length) return res.status(404).json({ success: false, error: 'Volunteer profile not found' });
-    const { rows: existing } = await pool.query(
-      'SELECT id FROM applications WHERE volunteer_id = $1 AND event_id = $2',
-      [volRows[0].id, eventId]
-    );
-    if (existing.length) return res.status(409).json({ success: false, error: 'Already signed up for this event' });
+    // Duplicate check: per shift if shiftId provided, else per event
+    const dupCheck = shiftId
+      ? await pool.query(
+          'SELECT id FROM applications WHERE volunteer_id = $1 AND event_id = $2 AND shift_id = $3',
+          [volRows[0].id, eventId, shiftId]
+        )
+      : await pool.query(
+          'SELECT id FROM applications WHERE volunteer_id = $1 AND event_id = $2 AND shift_id IS NULL',
+          [volRows[0].id, eventId]
+        );
+    if (dupCheck.rows.length) return res.status(409).json({ success: false, error: 'Already signed up for this shift' });
     const id = crypto.randomUUID();
     await pool.query(
-      'INSERT INTO applications (id, org_id, volunteer_id, event_id, status) VALUES ($1, $2, $3, $4, $5)',
-      [id, req.orgId, volRows[0].id, eventId, 'APPROVED']
+      'INSERT INTO applications (id, org_id, volunteer_id, event_id, shift_id, status) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, req.orgId, volRows[0].id, eventId, shiftId || null, 'APPROVED']
     );
     res.status(201).json({ success: true, data: { id } });
   } catch (err) {
@@ -3381,10 +3439,18 @@ app.delete('/api/portal/signup/:eventId', requireAuth, async (req, res) => {
       [req.user.email, req.orgId]
     );
     if (!volRows.length) return res.status(404).json({ success: false, error: 'Volunteer profile not found' });
-    await pool.query(
-      'DELETE FROM applications WHERE volunteer_id = $1 AND event_id = $2 AND org_id = $3',
-      [volRows[0].id, req.params.eventId, req.orgId]
-    );
+    const shiftId = req.query.shiftId || null;
+    if (shiftId) {
+      await pool.query(
+        'DELETE FROM applications WHERE volunteer_id = $1 AND event_id = $2 AND shift_id = $3 AND org_id = $4',
+        [volRows[0].id, req.params.eventId, shiftId, req.orgId]
+      );
+    } else {
+      await pool.query(
+        'DELETE FROM applications WHERE volunteer_id = $1 AND event_id = $2 AND shift_id IS NULL AND org_id = $3',
+        [volRows[0].id, req.params.eventId, req.orgId]
+      );
+    }
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /api/portal/signup error:', err.message);

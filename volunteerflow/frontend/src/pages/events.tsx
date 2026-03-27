@@ -595,6 +595,9 @@ export default function Events() {
       });
       setEditingEvent(null);
       setView('list');
+      import('react-hot-toast').then(({ default: toast }) =>
+        toast('⚠️ Backend offline — changes saved locally only. Reconnect and re-save to make shifts visible in the volunteer portal.', { duration: 8000 })
+      );
       return;
     }
 

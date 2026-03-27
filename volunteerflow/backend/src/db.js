@@ -685,11 +685,11 @@ Best,
 
 Great news — your volunteer application has been approved! Welcome to the [Organization Name] family.
 
-Access your volunteer portal here to set up your account and get started:
+Access your volunteer portal here to get started:
 [Portal Link]
 
 Next steps:
-• Create your password using the link above
+• Sign in using the email and password you provided when you applied
 • Browse upcoming events and sign up for shifts
 • Connect with our volunteer coordinator for any questions
 
@@ -904,6 +904,20 @@ async function initDb() {
         [approvedTpl.body, approvedTpl.subject]
       );
     }
+    // Add shift_id column to applications for per-shift signup tracking
+    await client.query(`ALTER TABLE applications ADD COLUMN IF NOT EXISTS shift_id TEXT`);
+    // Migrate approval templates with outdated "Create your password" wording
+    await client.query(
+      `UPDATE message_templates
+       SET body = REPLACE(
+         REPLACE(body,
+           'Access your volunteer portal here to set up your account and get started:',
+           'Access your volunteer portal here to get started:'),
+         '• Create your password using the link above',
+         '• Sign in using the email and password you provided when you applied')
+       WHERE id LIKE 'tpl_application_approved_%'
+         AND body LIKE '%Create your password using the link above%'`
+    );
     // Load staff schema (tables + seed roles) — runs after customer tables exist
     await loadStaffSchema(client);
     // Seed system_settings defaults (ON CONFLICT ensures we never overwrite existing values)

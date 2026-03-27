@@ -150,6 +150,18 @@ function FieldInput({ field, value, onChange }: FieldProps) {
       return (
         <ImageUploadField value={value} onChange={onChange} required={field.required} />
       );
+    case 'password':
+      return (
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          required={field.required}
+          minLength={8}
+          className={inputCls}
+        />
+      );
     default:
       return (
         <input

@@ -30,6 +30,18 @@ const portalApi = {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface EventShift {
+  id: string;
+  name: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  capacity: number;
+  signedUp: number;
+  role: string;
+  description?: string;
+}
+
 interface PortalEvent {
   id: string;
   title: string;
@@ -40,11 +52,13 @@ interface PortalEvent {
   endDate: string | null;
   spotsAvailable: number;
   participantCount: number;
+  shifts: EventShift[];
 }
 
 interface PortalSignup {
   id: string;
   event_id: string;
+  shift_id: string | null;
   status: string;
   title: string;
   start_date: string | null;
@@ -517,23 +531,44 @@ function HomeTab({
   );
 }
 
-// ─── Events Tab ───────────────────────────────────────────────────────────────
+// ─── Shift List View (drill-down from an event card) ─────────────────────────
 
-function EventsTab({
-  events, signups, onSignup, onCancel, showToast,
+function ShiftListView({
+  event: initialEvent, signups, onBack, onSignup, onCancel, showToast,
 }: {
-  events: PortalEvent[];
+  event: PortalEvent;
   signups: PortalSignup[];
-  onSignup: (eventId: string) => Promise<void>;
-  onCancel: (eventId: string) => Promise<void>;
+  onBack: () => void;
+  onSignup: (eventId: string, shiftId?: string) => Promise<void>;
+  onCancel: (eventId: string, shiftId?: string) => Promise<void>;
   showToast: (msg: string) => void;
 }) {
+  const [event, setEvent] = useState<PortalEvent>(initialEvent);
+  // Only block rendering if we have no cached shifts yet — show immediately if list already had them
+  const [loadingEvent, setLoadingEvent] = useState((initialEvent.shifts ?? []).length === 0);
+  const [fetchError, setFetchError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const handleSignup = async (id: string) => {
-    setBusy(id);
+  useEffect(() => {
+    let cancelled = false;
+    portalApi.get<PortalEvent>(`/portal/events/${initialEvent.id}`)
+      .then(fresh => { if (!cancelled) { setEvent(fresh); setFetchError(false); } })
+      .catch(() => { if (!cancelled) setFetchError(true); })
+      .finally(() => { if (!cancelled) setLoadingEvent(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialEvent.id]);
+
+  const hasShifts = (event.shifts ?? []).length > 0;
+  const signedShiftIds = new Set(
+    signups.filter(s => s.event_id === event.id && s.shift_id).map(s => s.shift_id!)
+  );
+  const signedForWholeEvent = signups.some(s => s.event_id === event.id && !s.shift_id);
+
+  const handleSignup = async (shiftId?: string) => {
+    setBusy(shiftId ?? 'event');
     try {
-      await onSignup(id);
+      await onSignup(event.id, shiftId);
       showToast('🎉 You\'re signed up!');
     } catch (err) {
       showToast(`❌ ${err instanceof Error ? err.message : 'Sign-up failed'}`);
@@ -542,10 +577,10 @@ function EventsTab({
     }
   };
 
-  const handleCancel = async (id: string) => {
-    setBusy(id);
+  const handleCancel = async (shiftId?: string) => {
+    setBusy(shiftId ?? 'event');
     try {
-      await onCancel(id);
+      await onCancel(event.id, shiftId);
       showToast('Signup cancelled');
     } catch {
       showToast('❌ Could not cancel signup');
@@ -553,6 +588,205 @@ function EventsTab({
       setBusy(null);
     }
   };
+
+  const { month, day } = parseEventDate(event.startDate);
+  const time = formatEventTime(event.startDate, event.endDate);
+
+  return (
+    <div>
+      <button
+        onClick={onBack}
+        className="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 mb-4 transition-colors"
+      >
+        ← Back to events
+      </button>
+
+      {loadingEvent ? (
+        <div className="flex items-center justify-center gap-2 text-sm text-neutral-400 dark:text-neutral-500 py-12">
+          <div className="w-5 h-5 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+          Loading shifts…
+        </div>
+      ) : (
+        <>
+          {fetchError && !hasShifts && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 mb-4 text-sm text-red-600 dark:text-red-400">
+              Could not load shift details. Please go back and try again.
+            </div>
+          )}
+
+          {/* Event header */}
+          <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-5 mb-5 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl bg-gradient-to-r from-primary-400 to-warning-400" />
+            <div className="flex gap-3 items-start">
+              <DateBlock month={month} day={day} />
+              <div className="flex-1">
+                <p className="font-bold text-base text-neutral-900 dark:text-neutral-100 mb-1">{event.title}</p>
+                <div className="flex flex-wrap gap-2">
+                  {time && <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {time}</span>}
+                  {event.location && <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {event.location}</span>}
+                  {event.category && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-600">
+                      {event.category}
+                    </span>
+                  )}
+                </div>
+                {event.description && (
+                  <p className="text-[13px] text-neutral-500 dark:text-neutral-400 leading-relaxed mt-2">{event.description}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {hasShifts ? (
+            <>
+              <h4 className="text-sm font-bold text-neutral-700 dark:text-neutral-300 mb-3">
+                Available Shifts <span className="text-neutral-400 dark:text-neutral-500 font-normal">({event.shifts.length})</span>
+              </h4>
+              {event.shifts.map(shift => {
+                const remaining = shift.capacity - shift.signedUp;
+                const full = remaining <= 0;
+                const signed = signedShiftIds.has(shift.id);
+                const isBusy = busy === shift.id;
+                const fillPct = Math.min(100, Math.round((shift.signedUp / Math.max(shift.capacity, 1)) * 100));
+                return (
+                  <div
+                    key={shift.id}
+                    className={`bg-white dark:bg-neutral-800 border rounded-xl p-4 mb-3 shadow-sm relative overflow-hidden ${
+                      signed ? 'border-success-300 dark:border-success-700' : full ? 'border-neutral-200 dark:border-neutral-700 opacity-75' : 'border-neutral-200 dark:border-neutral-700'
+                    }`}
+                  >
+                    <div className={`absolute top-0 left-0 right-0 h-0.5 rounded-t-xl ${signed ? 'bg-gradient-to-r from-success-400 to-primary-400' : full ? 'bg-neutral-200 dark:bg-neutral-700' : 'bg-gradient-to-r from-primary-400 to-warning-400'}`} />
+                    <div className="mb-3">
+                      <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5">{shift.name}</p>
+                      <div className="flex flex-wrap gap-3 text-xs text-neutral-500 dark:text-neutral-400">
+                        {shift.date && (
+                          <span>📅 {new Date(shift.date + 'T00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                        )}
+                        {shift.startTime && shift.endTime && <span>⏰ {shift.startTime} – {shift.endTime}</span>}
+                        {shift.role && <span>👤 {shift.role}</span>}
+                      </div>
+                      {shift.description && (
+                        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1.5 leading-relaxed">{shift.description}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-[100px]">
+                        <p className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-1">
+                          {full ? 'Shift full' : `${remaining} spot${remaining !== 1 ? 's' : ''} remaining`}
+                        </p>
+                        <div className="h-1.5 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${full ? 'bg-danger-400' : remaining > shift.capacity * 0.4 ? 'bg-success-400' : 'bg-warning-400'}`}
+                            style={{ width: `${fillPct}%` }}
+                          />
+                        </div>
+                      </div>
+                      {signed ? (
+                        <button
+                          onClick={() => handleCancel(shift.id)}
+                          disabled={isBusy}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800 hover:bg-danger-50 hover:text-danger-600 hover:border-danger-200 dark:hover:bg-danger-900/20 dark:hover:text-danger-400 dark:hover:border-danger-800 transition-colors disabled:opacity-60"
+                        >
+                          {isBusy ? '…' : '✓ Signed up'}
+                        </button>
+                      ) : full ? (
+                        <span className="flex items-center gap-1 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs font-bold rounded-full">🔒 Full</span>
+                      ) : (
+                        <button
+                          onClick={() => handleSignup(shift.id)}
+                          disabled={isBusy}
+                          className="px-4 py-1.5 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors"
+                        >
+                          {isBusy ? 'Signing up…' : 'Sign Up'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-5 shadow-sm">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-1">General Signup</p>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
+                No specific shifts for this event — sign up to join as a volunteer.
+              </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex-1">
+                  {event.spotsAvailable > 0 && (
+                    <>
+                      <p className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-1">
+                        {Math.max(0, event.spotsAvailable - event.participantCount)} spot{event.spotsAvailable - event.participantCount !== 1 ? 's' : ''} remaining
+                      </p>
+                      <div className="h-1.5 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-success-400 transition-all"
+                          style={{ width: `${Math.min(100, Math.round((event.participantCount / Math.max(event.spotsAvailable, 1)) * 100))}%` }}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+                {signedForWholeEvent ? (
+                  <button
+                    onClick={() => handleCancel(undefined)}
+                    disabled={busy === 'event'}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800 hover:bg-danger-50 hover:text-danger-600 hover:border-danger-200 dark:hover:bg-danger-900/20 dark:hover:text-danger-400 dark:hover:border-danger-800 transition-colors disabled:opacity-60"
+                  >
+                    {busy === 'event' ? '…' : '✓ Signed up'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSignup(undefined)}
+                    disabled={busy === 'event'}
+                    className="px-4 py-1.5 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors"
+                  >
+                    {busy === 'event' ? 'Signing up…' : 'Sign Up'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Events Tab ───────────────────────────────────────────────────────────────
+
+function EventsTab({
+  events, signups, onSignup, onCancel, showToast,
+}: {
+  events: PortalEvent[];
+  signups: PortalSignup[];
+  onSignup: (eventId: string, shiftId?: string) => Promise<void>;
+  onCancel: (eventId: string, shiftId?: string) => Promise<void>;
+  showToast: (msg: string) => void;
+}) {
+  const [selectedEvent, setSelectedEvent] = useState<PortalEvent | null>(null);
+
+  // Keep selectedEvent in sync when the events list refreshes (e.g. after signup)
+  useEffect(() => {
+    if (selectedEvent) {
+      const updated = events.find(e => e.id === selectedEvent.id);
+      if (updated) setSelectedEvent(updated);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
+  if (selectedEvent) {
+    return (
+      <ShiftListView
+        event={selectedEvent}
+        signups={signups}
+        onBack={() => setSelectedEvent(null)}
+        onSignup={onSignup}
+        onCancel={onCancel}
+        showToast={showToast}
+      />
+    );
+  }
 
   if (!events.length) return (
     <div className="text-center py-16 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-2xl bg-white dark:bg-neutral-800 mt-2">
@@ -565,75 +799,63 @@ function EventsTab({
   return (
     <div>
       <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-1">Upcoming Events</h3>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Find and sign up for volunteer opportunities.</p>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Tap an event to view shifts and sign up.</p>
 
       {events.map(ev => {
-        const signed    = signups.some(s => s.event_id === ev.id);
-        const remaining = ev.spotsAvailable - ev.participantCount;
-        const full      = remaining <= 0 && !signed;
-        const fillPct   = Math.min(100, Math.round((ev.participantCount / Math.max(ev.spotsAvailable, 1)) * 100));
+        const anySignedUp = signups.some(s => s.event_id === ev.id);
+        const shiftCount  = ev.shifts?.length ?? 0;
+        const remaining   = ev.spotsAvailable - ev.participantCount;
+        const full        = remaining <= 0 && !anySignedUp;
         const { month, day } = parseEventDate(ev.startDate);
         const time = formatEventTime(ev.startDate, ev.endDate);
-        const isBusy = busy === ev.id;
 
         return (
-          <div
+          <button
             key={ev.id}
-            className={`bg-white dark:bg-neutral-800 border rounded-xl p-5 mb-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md relative overflow-hidden ${
-              signed ? 'border-success-300 dark:border-success-700' : full ? 'border-neutral-200 dark:border-neutral-700 opacity-75' : 'border-neutral-200 dark:border-neutral-700'
+            onClick={() => setSelectedEvent(ev)}
+            className={`w-full text-left bg-white dark:bg-neutral-800 border rounded-xl p-5 mb-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99] relative overflow-hidden ${
+              anySignedUp ? 'border-success-300 dark:border-success-700' : full ? 'border-neutral-200 dark:border-neutral-700 opacity-75' : 'border-neutral-200 dark:border-neutral-700'
             }`}
           >
-            <div className={`absolute top-0 left-0 right-0 h-0.5 rounded-t-xl ${signed ? 'bg-gradient-to-r from-success-400 to-primary-400' : full ? 'bg-neutral-200 dark:bg-neutral-700' : 'bg-gradient-to-r from-primary-400 to-warning-400'}`} />
+            <div className={`absolute top-0 left-0 right-0 h-0.5 rounded-t-xl ${anySignedUp ? 'bg-gradient-to-r from-success-400 to-primary-400' : full ? 'bg-neutral-200 dark:bg-neutral-700' : 'bg-gradient-to-r from-primary-400 to-warning-400'}`} />
 
-            <div className="flex gap-3 items-start mb-3">
+            <div className="flex gap-3 items-start">
               <DateBlock month={month} day={day} muted={full} />
-              <div className="flex-1">
-                <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5">{ev.title}</p>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 mb-1.5 truncate">{ev.title}</p>
                 <div className="flex flex-wrap gap-2">
                   {time && <span className="text-xs text-neutral-500 dark:text-neutral-400">⏰ {time}</span>}
                   {ev.location && <span className="text-xs text-neutral-500 dark:text-neutral-400">📍 {ev.location}</span>}
-                  {ev.category && <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-600">{ev.category}</span>}
+                  {ev.category && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-600">
+                      {ev.category}
+                    </span>
+                  )}
                 </div>
+                {ev.description && (
+                  <p className="text-[13px] text-neutral-500 dark:text-neutral-400 leading-relaxed mt-2 line-clamp-2">{ev.description}</p>
+                )}
               </div>
+              <div className="flex-shrink-0 text-neutral-400 dark:text-neutral-500 text-sm self-center">›</div>
             </div>
 
-            {ev.description && (
-              <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-4 line-clamp-2">{ev.description}</p>
-            )}
-
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex-1 min-w-[120px]">
-                <p className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-1">
-                  {full ? 'Event full' : `${remaining} spot${remaining !== 1 ? 's' : ''} remaining`}
-                </p>
-                <div className="h-1.5 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${full ? 'bg-danger-400' : remaining > ev.spotsAvailable * 0.4 ? 'bg-success-400' : 'bg-warning-400'}`}
-                    style={{ width: `${fillPct}%` }}
-                  />
-                </div>
+            <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-700">
+              <div className="flex items-center gap-3 text-[11px] text-neutral-400 dark:text-neutral-500 font-medium">
+                {shiftCount > 0 && (
+                  <span>🕐 {shiftCount} shift{shiftCount !== 1 ? 's' : ''}</span>
+                )}
+                {!full && ev.spotsAvailable > 0 && (
+                  <span>{remaining} spot{remaining !== 1 ? 's' : ''} left</span>
+                )}
+                {full && <span className="text-danger-400">Full</span>}
               </div>
-              {signed ? (
-                <button
-                  onClick={() => handleCancel(ev.id)}
-                  disabled={isBusy}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800 hover:bg-danger-50 hover:text-danger-600 hover:border-danger-200 dark:hover:bg-danger-900/20 dark:hover:text-danger-400 dark:hover:border-danger-800 transition-colors disabled:opacity-60"
-                >
-                  {isBusy ? '…' : '✓ Signed up'}
-                </button>
-              ) : full ? (
-                <span className="flex items-center gap-1 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs font-bold rounded-full">🔒 Full</span>
-              ) : (
-                <button
-                  onClick={() => handleSignup(ev.id)}
-                  disabled={isBusy}
-                  className="px-4 py-1.5 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-colors"
-                >
-                  {isBusy ? 'Signing up…' : 'Sign Up'}
-                </button>
+              {anySignedUp && (
+                <span className="flex items-center gap-1 px-2.5 py-1 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-[11px] font-bold rounded-full border border-success-200 dark:border-success-800">
+                  ✓ Signed up
+                </span>
               )}
             </div>
-          </div>
+          </button>
         );
       })}
     </div>
@@ -646,7 +868,7 @@ function MyEventsTab({
   signups, onCancel, showToast,
 }: {
   signups: PortalSignup[];
-  onCancel: (eventId: string) => Promise<void>;
+  onCancel: (eventId: string, shiftId?: string) => Promise<void>;
   showToast: (msg: string) => void;
 }) {
   const [subTab, setSubTab] = useState<'upcoming' | 'past'>('upcoming');
@@ -655,10 +877,10 @@ function MyEventsTab({
   const upcomingList = signups.filter(s => isUpcoming(s.start_date));
   const pastList     = signups.filter(s => !isUpcoming(s.start_date));
 
-  const handleCancel = async (eventId: string) => {
-    setBusy(eventId);
+  const handleCancel = async (signupId: string, eventId: string, shiftId?: string) => {
+    setBusy(signupId);
     try {
-      await onCancel(eventId);
+      await onCancel(eventId, shiftId ?? undefined);
       showToast('Signup cancelled');
     } catch {
       showToast('❌ Could not cancel signup');
@@ -713,13 +935,16 @@ function MyEventsTab({
                 </div>
                 {s.description && <p className="text-[13.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed mb-4 line-clamp-2">{s.description}</p>}
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800">✓ You're going</span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="flex items-center gap-1 px-3 py-1.5 bg-success-50 dark:bg-success-900/20 text-success-600 dark:text-success-400 text-xs font-bold rounded-full border border-success-200 dark:border-success-800">✓ You're going</span>
+                    {s.shift_id && <span className="text-[11px] text-neutral-400 dark:text-neutral-500 px-1">Shift signup</span>}
+                  </div>
                   <button
-                    onClick={() => handleCancel(s.event_id)}
-                    disabled={busy === s.event_id}
+                    onClick={() => handleCancel(s.id, s.event_id, s.shift_id ?? undefined)}
+                    disabled={busy === s.id}
                     className="px-3 py-1.5 border border-danger-200 dark:border-danger-800 text-danger-600 dark:text-danger-400 text-xs font-semibold rounded-lg hover:bg-danger-50 dark:hover:bg-danger-900/20 transition-colors disabled:opacity-60"
                   >
-                    {busy === s.event_id ? '…' : 'Cancel signup'}
+                    {busy === s.id ? '…' : 'Cancel signup'}
                   </button>
                 </div>
               </div>
@@ -913,14 +1138,14 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
     return () => { cancelled = true; };
   }, []);
 
-  const handleSignup = useCallback(async (eventId: string) => {
-    await portalApi.post('/portal/signup', { eventId });
-    // Optimistically update signups list
+  const handleSignup = useCallback(async (eventId: string, shiftId?: string) => {
+    await portalApi.post('/portal/signup', { eventId, shiftId });
     const ev = events.find(e => e.id === eventId);
     if (ev) {
       const newSignup: PortalSignup = {
         id: crypto.randomUUID(),
         event_id: eventId,
+        shift_id: shiftId ?? null,
         status: 'APPROVED',
         title: ev.title,
         start_date: ev.startDate,
@@ -930,14 +1155,27 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
         description: ev.description,
       };
       setSignups(prev => [...prev, newSignup]);
-      setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participantCount: e.participantCount + 1 } : e));
+      setEvents(prev => prev.map(e => {
+        if (e.id !== eventId) return e;
+        if (shiftId) {
+          return { ...e, shifts: e.shifts.map(s => s.id === shiftId ? { ...s, signedUp: s.signedUp + 1 } : s) };
+        }
+        return { ...e, participantCount: e.participantCount + 1 };
+      }));
     }
   }, [events]);
 
-  const handleCancel = useCallback(async (eventId: string) => {
-    await portalApi.delete(`/portal/signup/${eventId}`);
-    setSignups(prev => prev.filter(s => s.event_id !== eventId));
-    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participantCount: Math.max(0, e.participantCount - 1) } : e));
+  const handleCancel = useCallback(async (eventId: string, shiftId?: string) => {
+    const qs = shiftId ? `?shiftId=${encodeURIComponent(shiftId)}` : '';
+    await portalApi.delete(`/portal/signup/${eventId}${qs}`);
+    setSignups(prev => prev.filter(s => !(s.event_id === eventId && (shiftId ? s.shift_id === shiftId : !s.shift_id))));
+    setEvents(prev => prev.map(e => {
+      if (e.id !== eventId) return e;
+      if (shiftId) {
+        return { ...e, shifts: e.shifts.map(s => s.id === shiftId ? { ...s, signedUp: Math.max(0, s.signedUp - 1) } : s) };
+      }
+      return { ...e, participantCount: Math.max(0, e.participantCount - 1) };
+    }));
   }, []);
 
   const upcomingSignupCount = signups.filter(s => isUpcoming(s.start_date)).length;
