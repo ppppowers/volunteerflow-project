@@ -6,7 +6,49 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const crypto = require('crypto');
-const { generateSecret, generateURI, verifySync } = require('otplib');
+// TOTP via Node built-in crypto (RFC 6238 / HOTP RFC 4226)
+function _b32decode(str) {
+  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  str = str.toUpperCase().replace(/=+$/, '');
+  const bytes = [];
+  let bits = 0, val = 0;
+  for (const ch of str) {
+    const idx = alpha.indexOf(ch);
+    if (idx === -1) throw new Error('Invalid base32');
+    val = (val << 5) | idx; bits += 5;
+    if (bits >= 8) { bytes.push((val >>> (bits - 8)) & 0xff); bits -= 8; }
+  }
+  return Buffer.from(bytes);
+}
+function _b32encode(buf) {
+  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let out = '', bits = 0, val = 0;
+  for (const byte of buf) {
+    val = (val << 8) | byte; bits += 8;
+    while (bits >= 5) { out += alpha[(val >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += alpha[(val << (5 - bits)) & 31];
+  return out;
+}
+function _hotp(secret, counter) {
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(counter));
+  const digest = crypto.createHmac('sha1', _b32decode(secret)).update(msg).digest();
+  const off = digest[19] & 0x0f;
+  const code = ((digest[off] & 0x7f) << 24) | (digest[off+1] << 16) | (digest[off+2] << 8) | digest[off+3];
+  return String(code % 1_000_000).padStart(6, '0');
+}
+function generateSecret() { return _b32encode(crypto.randomBytes(20)); }
+function generateURI({ secret, label, issuer }) {
+  const p = new URLSearchParams({ secret, issuer, algorithm: 'SHA1', digits: '6', period: '30' });
+  return `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(label)}?${p}`;
+}
+function verifySync({ token, secret }) {
+  const t = Math.floor(Date.now() / 1000 / 30);
+  const tok = String(token).replace(/\s/g, '');
+  for (let d = -1; d <= 1; d++) { if (_hotp(secret, t + d) === tok) return { valid: true }; }
+  return { valid: false };
+}
 const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
