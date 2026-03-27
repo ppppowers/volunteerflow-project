@@ -2652,6 +2652,11 @@ See you soon,
             .replace(/\[Organization Name\]/gi, orgName)
             .replace(/\[Portal Link\]/gi, portalUrl);
 
+          // Always guarantee the portal link appears even if template omits [Portal Link]
+          if (!body.includes(portalUrl)) {
+            body += `\n\nAccess your volunteer portal here:\n${portalUrl}`;
+          }
+
           return sendEmail(email, subject, body, emailFrom);
         }).catch((err) => console.error('Approval email error:', err.message));
 

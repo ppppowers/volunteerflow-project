@@ -896,6 +896,14 @@ async function initDb() {
     // Migrate legacy role values to org_roles IDs
     await client.query(`UPDATE users SET role = 'role_admin'  WHERE role = 'admin'`);
     await client.query(`UPDATE users SET role = 'role_member' WHERE role = 'member'`);
+    // Migrate approval templates that are missing [Portal Link]
+    const approvedTpl = MESSAGE_TEMPLATES_SEED.find(t => t.id === 'tpl_application_approved');
+    if (approvedTpl) {
+      await client.query(
+        `UPDATE message_templates SET body = $1, subject = $2 WHERE id LIKE 'tpl_application_approved_%' AND body NOT LIKE '%[Portal Link]%'`,
+        [approvedTpl.body, approvedTpl.subject]
+      );
+    }
     // Load staff schema (tables + seed roles) — runs after customer tables exist
     await loadStaffSchema(client);
     // Seed system_settings defaults (ON CONFLICT ensures we never overwrite existing values)
