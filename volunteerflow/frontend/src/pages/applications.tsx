@@ -224,7 +224,7 @@ const formatDate = (d: string) =>
 
 const getApplicationUrl = (templateId: string) => {
   const base = typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com';
-  return `${base}/apply/${templateId}`;
+  return `${base}/apply?form=${templateId}`;
 };
 
 const getQrCodeUrl = (data: string, size = 200) =>
