@@ -1866,7 +1866,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
     const [volStats, evStats, appStats, hoursRes, catRes] = await Promise.all([
       pool.query(`SELECT
         COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE status = 'ACTIVE') AS active
+        COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active
         FROM volunteers WHERE org_id = $1`, [req.orgId]),
       pool.query(`SELECT
         COUNT(*) AS total,
@@ -3874,9 +3874,9 @@ app.post('/api/messages/send', requireAuth, async (req, res) => {
       );
       recipientRows = rows;
     } else {
-      // 'all' — send to all ACTIVE volunteers in this org
+      // 'all' — send to all active volunteers in this org
       const { rows } = await pool.query(
-        "SELECT email, phone FROM volunteers WHERE status = 'ACTIVE' AND org_id = $1",
+        "SELECT email, phone FROM volunteers WHERE LOWER(status) = 'active' AND org_id = $1",
         [req.orgId]
       );
       recipientRows = rows;
@@ -4150,7 +4150,7 @@ async function processAutoReminders() {
           ));
         } else {
           ({ rows: vols } = await pool.query(
-            "SELECT email, phone FROM volunteers WHERE status = 'ACTIVE' AND org_id = $1",
+            "SELECT email, phone FROM volunteers WHERE LOWER(status) = 'active' AND org_id = $1",
             [reminderOrgId]
           ));
         }
