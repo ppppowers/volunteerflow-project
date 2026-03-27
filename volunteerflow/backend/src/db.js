@@ -147,6 +147,7 @@ const SCHEMA_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_volunteers_org_id ON volunteers(org_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_volunteers_email_org ON volunteers(email, org_id);
 
   -- ── Events ────────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS events (

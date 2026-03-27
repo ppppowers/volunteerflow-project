@@ -2585,6 +2585,32 @@ app.put('/api/form-submissions/:id', requireAuth, async (req, res) => {
     if (!rows.length) return res.status(404).json({ success: false, error: 'Submission not found' });
 
     const sub = rows[0];
+
+    // When a volunteer submission is approved, create/update their volunteer record
+    if (status === 'APPROVED' && sub.applicant_type === 'volunteer' && sub.email) {
+      try {
+        const nameParts = (sub.name || '').trim().split(/\s+/);
+        const firstName = nameParts[0] || '';
+        const lastName  = nameParts.slice(1).join(' ') || '';
+        const email     = sub.email.trim().toLowerCase();
+        const volId     = generateId();
+        await pool.query(
+          `INSERT INTO volunteers (id, org_id, first_name, last_name, email, phone, status, join_date)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+           ON CONFLICT (email, org_id) DO UPDATE SET
+             first_name = EXCLUDED.first_name,
+             last_name  = EXCLUDED.last_name,
+             phone      = COALESCE(NULLIF(EXCLUDED.phone, ''), volunteers.phone),
+             status     = 'active'`,
+          [volId, req.orgId, firstName, lastName, email,
+           sub.phone || '', new Date().toISOString().slice(0, 10)]
+        );
+      } catch (volErr) {
+        console.error('Could not create volunteer record on approval:', volErr.message);
+        // Non-fatal — submission is still approved
+      }
+    }
+
     logAudit({ req, category: 'application', verb: status === 'APPROVED' ? 'approved' : status === 'REJECTED' ? 'rejected' : 'updated',
       resource: sub.name, detail: `Form submission status set to ${status}` });
 
@@ -3648,7 +3674,7 @@ app.delete('/api/roles/:id', requireAuth, requirePlan('grow'), writeLimiter, asy
 app.get('/api/team', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, email, full_name, role, created_at FROM users WHERE org_id = $1 ORDER BY created_at ASC',
+      'SELECT id, email, full_name, role, created_at, last_login FROM users WHERE org_id = $1 ORDER BY created_at ASC',
       [req.orgId]
     );
     res.json({ success: true, data: rows.map(u => ({
@@ -3657,7 +3683,8 @@ app.get('/api/team', requireAuth, async (req, res) => {
       email: u.email,
       role: u.role,
       isOwner: u.id === req.orgId,
-      joinedAt: u.created_at instanceof Date ? u.created_at.toISOString().split('T')[0] : (u.created_at || '').split('T')[0],
+      joinedAt: u.created_at instanceof Date ? u.created_at.toISOString() : (u.created_at || ''),
+      lastLogin: u.last_login instanceof Date ? u.last_login.toISOString() : (u.last_login || null),
     })) });
   } catch (err) {
     console.error('GET /api/team error:', err.message);
