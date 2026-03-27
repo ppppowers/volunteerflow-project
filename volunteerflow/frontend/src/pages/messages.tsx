@@ -1182,7 +1182,7 @@ function LoginNotificationsTab({ totalVolunteers }: { totalVolunteers: number })
 
   async function toggleActive(notif: LoginNotification) {
     try {
-      const updated = await api.patch<LoginNotification>(`/messages/login-notifications/${notif.id}/toggle`);
+      const updated = await api.patch<LoginNotification>(`/messages/login-notifications/${notif.id}/toggle`, {});
       setNotifications(prev => prev.map(n => n.id === notif.id ? updated : n));
     } catch {
       toast.error('Failed to update notification');
