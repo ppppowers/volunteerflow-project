@@ -3739,6 +3739,31 @@ app.delete('/api/team/:id', requireAuth, writeLimiter, async (req, res) => {
   }
 });
 
+// ── SMS Diagnostic ────────────────────────────────────────────────────────────
+
+app.post('/api/messages/test-sms', requireAuth, async (req, res) => {
+  const { to } = req.body;
+  if (!to) return res.status(400).json({ error: 'to required' });
+  const TWILIO_ACCOUNT_SID  = process.env.TWILIO_ACCOUNT_SID || '';
+  const TWILIO_AUTH_TOKEN   = process.env.TWILIO_AUTH_TOKEN || '';
+  const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || '';
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    return res.json({ ok: false, error: 'Twilio env vars not set', sid: null, phone: TWILIO_PHONE_NUMBER });
+  }
+  try {
+    const twilio = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const digits = to.replace(/\D/g, '');
+    const normalized = to.trim().startsWith('+') ? to.trim()
+      : digits.length === 10 ? `+1${digits}`
+      : digits.length === 11 && digits[0] === '1' ? `+${digits}`
+      : to;
+    const msg = await twilio.messages.create({ from: TWILIO_PHONE_NUMBER, to: normalized, body: 'VolunteerFlow SMS test' });
+    res.json({ ok: true, sid: msg.sid, status: msg.status, to: normalized, from: TWILIO_PHONE_NUMBER });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, code: err.code, to, from: TWILIO_PHONE_NUMBER });
+  }
+});
+
 // ── Message Templates ─────────────────────────────────────────────────────────
 
 app.get('/api/messages/templates', requireAuth, async (req, res) => {
