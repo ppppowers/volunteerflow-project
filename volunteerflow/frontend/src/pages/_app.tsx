@@ -1,5 +1,6 @@
 import '@/styles/globals.css';
 import type { AppProps } from 'next/app';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { Inter } from 'next/font/google';
 import { useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
@@ -93,6 +94,7 @@ export default function App({ Component, pageProps }: AppProps) {
                 <SupportBanner />
                 <AppearanceInit />
                 <Component {...pageProps} />
+                <SpeedInsights />
                 <Toaster
                   position="top-right"
                   toastOptions={{
