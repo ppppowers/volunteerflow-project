@@ -1403,15 +1403,15 @@ export default function MessagesPage() {
 
   useEffect(() => {
     Promise.all([
-      api.get<{ id: string; first_name: string; last_name: string; email: string; phone: string }[]>('/volunteers'),
-      api.get<{ id: string; title: string }[]>('/events'),
+      api.get<{ id: string; firstName: string; lastName: string; email: string; phone: string }[]>('/volunteers?limit=500'),
+      api.get<{ id: string; title: string }[]>('/events?limit=500'),
       api.get<MessageTemplate[]>('/messages/templates'),
       api.get<AutoReminder[]>('/messages/reminders'),
       api.get<SentMessage[]>('/messages/history'),
     ]).then(([vols, evts, tmpls, rems, hist]) => {
       setVolunteers(vols.map((v) => ({
         id: v.id,
-        name: `${v.first_name} ${v.last_name}`.trim(),
+        name: `${v.firstName} ${v.lastName}`.trim(),
         email: v.email,
         phone: v.phone,
       })));
