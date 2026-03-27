@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+﻿import { useState, useRef, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import Head from 'next/head';
@@ -597,7 +597,7 @@ export default function PortalDesignerPage() {
   const orgName = (() => {
     if (typeof window === 'undefined') return '';
     try {
-      const u = JSON.parse(localStorage.getItem('vf_user') || '{}');
+      const u = JSON.parse(sessionStorage.getItem('vf_user') || '{}');
       return u.orgName || u.name || 'My Organisation';
     } catch { return 'My Organisation'; }
   })();

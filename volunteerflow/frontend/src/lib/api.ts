@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Centralized API client for the VolunteerFlow backend.
  *
  * Usage:
@@ -28,7 +28,7 @@ type RequestOptions = Omit<RequestInit, 'body'> & {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { body, headers, ...rest } = options;
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('vf_token') : null;
+  const token = typeof window !== 'undefined' ? sessionStorage.getItem('vf_token') : null;
 
   const init: RequestInit = {
     ...rest,
@@ -60,8 +60,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (!response.ok) {
     // 401: token invalid/expired — clear stored auth and redirect to login
     if (response.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('vf_token');
-      localStorage.removeItem('vf_user');
+      sessionStorage.removeItem('vf_token');
+      sessionStorage.removeItem('vf_user');
       window.location.href = '/landing';
     }
     const message =
@@ -96,7 +96,7 @@ export const api = {
 
   /** Upload a file as multipart/form-data. Do NOT set Content-Type — the browser sets it with the boundary. */
   upload: async <T>(path: string, formData: FormData): Promise<T> => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('vf_token') : null;
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('vf_token') : null;
     const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
     const response = await fetch(url, {
       method: 'POST',
@@ -112,8 +112,8 @@ export const api = {
 
     if (!response.ok) {
       if (response.status === 401 && typeof window !== 'undefined') {
-        localStorage.removeItem('vf_token');
-        localStorage.removeItem('vf_user');
+        sessionStorage.removeItem('vf_token');
+        sessionStorage.removeItem('vf_user');
         window.location.href = '/landing';
       }
       const message = (json as { error?: string })?.error ?? `HTTP ${response.status}: ${response.statusText}`;

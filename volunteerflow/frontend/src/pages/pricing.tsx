@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import PublicNav from '@/components/PublicNav';
 import PublicFooter from '@/components/PublicFooter';
@@ -572,7 +572,7 @@ export default function PricingPage() {
   const { currentPlan, setPlan } = usePlan();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   useEffect(() => {
-    setIsLoggedIn(Boolean(localStorage.getItem('vf_token')));
+    setIsLoggedIn(Boolean(sessionStorage.getItem('vf_token')));
   }, []);
   // Only highlight a current plan when the user is actually signed in
   const activePlan: PlanId | null = isLoggedIn ? currentPlan : null;

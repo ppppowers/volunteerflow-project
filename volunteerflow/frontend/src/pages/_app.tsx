@@ -1,4 +1,4 @@
-import '@/styles/globals.css';
+﻿import '@/styles/globals.css';
 import type { AppProps } from 'next/app';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import { Inter } from 'next/font/google';
@@ -42,7 +42,7 @@ const ACCENT_PALETTES: Record<string, Record<string, string>> = {
 function PlanLoader() {
   const { setPlan } = usePlan();
   useEffect(() => {
-    const token = localStorage.getItem('vf_token');
+    const token = sessionStorage.getItem('vf_token');
     if (!token) return;
     // Use raw fetch — api.get() redirects to /landing?mode=signin on 401,
     // which would pop the sign-in modal for any expired token.

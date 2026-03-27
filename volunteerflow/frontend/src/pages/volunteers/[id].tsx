@@ -19,6 +19,21 @@ import {
   type ChecklistTemplate, type CertificationTemplate, type CertificationEntry,
   type HourEntry, type VolunteerBadge,
 } from '../volunteers';
+import { api } from '@/lib/api';
+
+interface ApiVolunteer {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  location?: string;
+  joinDate?: string;
+  avatar?: string;
+  skills?: string[];
+  hoursContributed?: number;
+  status: string;
+}
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
 const inputClass = 'w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none placeholder-neutral-400 dark:placeholder-neutral-500';
@@ -64,15 +79,44 @@ export default function VolunteerDetail() {
   });
 
   useEffect(() => {
-    if (id) {
-      const found = mockVolunteers.find((v) => v.id === id);
-      if (found) {
-        const withDefaults = { ...found, checklist: found.checklist || [], certifications: found.certifications || [] };
-        setVolunteer(withDefaults);
-        setFormData({ name: found.name, email: found.email, phone: found.phone, location: found.location, skills: found.skills.join(', '), status: found.status, avatar: found.avatar || '' });
-        setAvatarPreview(found.avatar || '');
-      }
-    }
+    if (!id) return;
+    api.get<ApiVolunteer>(`/volunteers/${id}`)
+      .then((data) => {
+        const statusRaw = data.status?.toLowerCase();
+        const status: Volunteer['status'] =
+          statusRaw === 'inactive' ? 'inactive' : statusRaw === 'pending' ? 'pending' : 'active';
+        const v: Volunteer = {
+          id: data.id,
+          volunteerId: `VOL-${data.id}`,
+          name: `${data.firstName} ${data.lastName}`.trim(),
+          email: data.email,
+          phone: data.phone ?? '',
+          location: data.location ?? '',
+          joinDate: data.joinDate ?? new Date().toISOString().split('T')[0],
+          status,
+          eventsCompleted: 0,
+          hoursContributed: data.hoursContributed ?? 0,
+          skills: data.skills ?? [],
+          rating: 0,
+          avatar: data.avatar ?? '',
+          events: [],
+          checklist: [],
+          certifications: [],
+        };
+        setVolunteer(v);
+        setFormData({ name: v.name, email: v.email, phone: v.phone, location: v.location, skills: v.skills.join(', '), status: v.status, avatar: v.avatar || '' });
+        setAvatarPreview(v.avatar || '');
+      })
+      .catch(() => {
+        // Fall back to mock data when backend is offline
+        const found = mockVolunteers.find((v) => String(v.id) === String(id));
+        if (found) {
+          const withDefaults = { ...found, checklist: found.checklist || [], certifications: found.certifications || [] };
+          setVolunteer(withDefaults);
+          setFormData({ name: found.name, email: found.email, phone: found.phone, location: found.location, skills: found.skills.join(', '), status: found.status, avatar: found.avatar || '' });
+          setAvatarPreview(found.avatar || '');
+        }
+      });
   }, [id]);
 
   if (!volunteer) {

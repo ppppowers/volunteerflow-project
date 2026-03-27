@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+﻿import React, { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useStaffAuth } from '../../context/StaffAuthContext';
 import { StaffSidebar } from './StaffSidebar';
@@ -23,10 +23,10 @@ export function StaffLayout({ children, requiredPerm }: Props) {
   function staffLogout() {
     fetch('/api/staff/auth/logout', {
       method: 'POST',
-      headers: { Authorization: 'Bearer ' + localStorage.getItem('vf_staff_token') },
+      headers: { Authorization: 'Bearer ' + sessionStorage.getItem('vf_staff_token') },
     }).catch(() => {});
-    localStorage.removeItem('vf_staff_token');
-    localStorage.removeItem('vf_staff_user');
+    sessionStorage.removeItem('vf_staff_token');
+    sessionStorage.removeItem('vf_staff_user');
     window.location.href = '/staff/login';
   }
 

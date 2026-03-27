@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { ReactNode, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
@@ -19,8 +19,8 @@ export default function Layout({ children }: LayoutProps) {
   const isAuthed = authState === 'authed';
 
   function orgLogout() {
-    localStorage.removeItem('vf_token');
-    localStorage.removeItem('vf_user');
+    sessionStorage.removeItem('vf_token');
+    sessionStorage.removeItem('vf_user');
     window.location.href = '/landing';
   }
 
@@ -32,7 +32,7 @@ export default function Layout({ children }: LayoutProps) {
   });
 
   useEffect(() => {
-    const token = localStorage.getItem('vf_token');
+    const token = sessionStorage.getItem('vf_token');
     if (!token) {
       setAuthState('redirecting');
       router.replace('/landing');
@@ -42,16 +42,16 @@ export default function Layout({ children }: LayoutProps) {
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       if (payload.exp && Date.now() / 1000 > payload.exp) {
-        localStorage.removeItem('vf_token');
-        localStorage.removeItem('vf_user');
+        sessionStorage.removeItem('vf_token');
+        sessionStorage.removeItem('vf_user');
         setAuthState('redirecting');
         router.replace('/landing');
         return;
       }
       setAuthState('authed');
     } catch {
-      localStorage.removeItem('vf_token');
-      localStorage.removeItem('vf_user');
+      sessionStorage.removeItem('vf_token');
+      sessionStorage.removeItem('vf_user');
       setAuthState('redirecting');
       router.replace('/landing');
     }

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+﻿import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { staffApi } from '../lib/staffApi';
 
 interface SupportSession {
@@ -51,9 +51,9 @@ export function SupportViewProvider({ children }: { children: React.ReactNode })
 
   const enterSupportView = (s: SupportSession, orgToken: string) => {
     // Back up any existing org token so we can restore it on exit
-    const existing = localStorage.getItem('vf_token');
+    const existing = sessionStorage.getItem('vf_token');
     if (existing) sessionStorage.setItem('vf_token_backup', existing);
-    localStorage.setItem('vf_token', orgToken);
+    sessionStorage.setItem('vf_token', orgToken);
     sessionStorage.setItem('vf_support_session', JSON.stringify(s));
     setSession(s);
   };
@@ -64,10 +64,10 @@ export function SupportViewProvider({ children }: { children: React.ReactNode })
     // Restore original org token (or remove if there wasn't one)
     const backup = sessionStorage.getItem('vf_token_backup');
     if (backup) {
-      localStorage.setItem('vf_token', backup);
+      sessionStorage.setItem('vf_token', backup);
       sessionStorage.removeItem('vf_token_backup');
     } else {
-      localStorage.removeItem('vf_token');
+      sessionStorage.removeItem('vf_token');
     }
     sessionStorage.removeItem('vf_support_session');
     setSession(null);

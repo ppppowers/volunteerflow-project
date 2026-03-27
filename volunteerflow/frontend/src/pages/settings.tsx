@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+﻿import { useState, useRef, useEffect, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
@@ -2525,7 +2525,7 @@ function DataTab() {
     setExportingType(type);
     setExportError('');
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('vf_token') : null;
+      const token = typeof window !== 'undefined' ? sessionStorage.getItem('vf_token') : null;
       const base = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api').replace(/\/$/, '');
       const res = await fetch(`${base}/data/export?type=${type}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -2579,8 +2579,8 @@ function DataTab() {
       setDangerAction(null);
       if (dangerAction === 'account') {
         // Wipe local state and redirect to auth
-        localStorage.removeItem('vf_token');
-        localStorage.removeItem('vf_user');
+        sessionStorage.removeItem('vf_token');
+        sessionStorage.removeItem('vf_user');
         window.location.href = '/landing';
       }
     } catch (err: any) {

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -43,7 +43,7 @@ const devNavigation = [
 function isDevUser(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    const role = localStorage.getItem('vf_role');
+    const role = sessionStorage.getItem('vf_role');
     return role === 'super_admin' || role === 'admin' || role === 'dev';
   } catch {
     return false;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
@@ -319,7 +319,7 @@ export default function SignupPage() {
         setLoading(false);
         return;
       }
-      localStorage.setItem('vf_token', json.data.token);
+      sessionStorage.setItem('vf_token', json.data.token);
       setWizard((w) => ({ ...w, orgName: form.orgName.trim() }));
       setLoading(false);
       setSuccess(true);
@@ -332,7 +332,7 @@ export default function SignupPage() {
   const handleWizardFinish = async () => {
     setWizardSaving(true);
     try {
-      const token = localStorage.getItem('vf_token');
+      const token = sessionStorage.getItem('vf_token');
       const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
       await fetch(`${base}/settings`, {
         method: 'PUT',

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { Eye, EyeOff, X } from 'lucide-react';
 
@@ -48,8 +48,8 @@ export function SignInModal({ open, onClose }: Props) {
       const data = await res.json();
       if (res.ok) {
         const { token, user } = data.data ?? data;
-        localStorage.setItem('vf_token', token);
-        localStorage.setItem('vf_user', JSON.stringify({
+        sessionStorage.setItem('vf_token', token);
+        sessionStorage.setItem('vf_user', JSON.stringify({
           email: user.email,
           name: user.fullName,
           orgName: user.orgName ?? '',
@@ -69,8 +69,8 @@ export function SignInModal({ open, onClose }: Props) {
       });
       const data = await res.json();
       if (res.ok) {
-        localStorage.setItem('vf_staff_token', data.token);
-        localStorage.setItem('vf_staff_user', JSON.stringify(data.user));
+        sessionStorage.setItem('vf_staff_token', data.token);
+        sessionStorage.setItem('vf_staff_user', JSON.stringify(data.user));
         onClose();
         router.replace('/staff');
         return;

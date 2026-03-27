@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import Head from "next/head";
 import { api, ApiError } from "@/lib/api";
@@ -584,8 +584,8 @@ function SignInPage({ onSuccess, onGoSignUp }: { onSuccess: () => void; onGoSign
       const data = await api.post<{ token: string; user: { email: string; fullName: string; orgName: string; role: string } }>(
         '/auth/login', { email, password }
       );
-      localStorage.setItem('vf_token', data.token);
-      localStorage.setItem('vf_user', JSON.stringify({ email: data.user.email, name: data.user.fullName, orgName: data.user.orgName }));
+      sessionStorage.setItem('vf_token', data.token);
+      sessionStorage.setItem('vf_user', JSON.stringify({ email: data.user.email, name: data.user.fullName, orgName: data.user.orgName }));
       onSuccess();
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Login failed. Please try again.';
@@ -709,8 +709,8 @@ function SignUpPage({ onSuccess, onGoSignIn }: { onSuccess: () => void; onGoSign
       const data = await api.post<{ token: string; user: { email: string; fullName: string; role: string } }>(
         '/auth/register', { fullName: form.fullName, email: form.email, password: form.password, orgName: form.orgName }
       );
-      localStorage.setItem('vf_token', data.token);
-      localStorage.setItem('vf_user', JSON.stringify({ email: data.user.email, name: data.user.fullName }));
+      sessionStorage.setItem('vf_token', data.token);
+      sessionStorage.setItem('vf_user', JSON.stringify({ email: data.user.email, name: data.user.fullName }));
       onSuccess();
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Registration failed. Please try again.';

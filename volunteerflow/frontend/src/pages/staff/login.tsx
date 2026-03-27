@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useRouter } from 'next/router';
 import { staffApi } from '../../lib/staffApi';
 
@@ -14,8 +14,8 @@ export default function StaffLogin() {
     setLoading(true); setError('');
     try {
       const res = await staffApi.post('/auth/login', { email, password }) as any;
-      localStorage.setItem('vf_staff_token', res.token);
-      localStorage.setItem('vf_staff_user', JSON.stringify(res.user));
+      sessionStorage.setItem('vf_staff_token', res.token);
+      sessionStorage.setItem('vf_staff_user', JSON.stringify(res.user));
       router.replace('/staff');
     } catch (err: any) {
       setError(err.message ?? 'Login failed');

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+﻿import React, { createContext, useContext, useEffect, useState } from 'react';
 import { staffApi } from '../lib/staffApi';
 import { canDo, Permission } from '../lib/staffPermissions';
 
@@ -22,7 +22,7 @@ export function StaffAuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const raw = localStorage.getItem('vf_staff_user');
+    const raw = sessionStorage.getItem('vf_staff_user');
     if (raw) {
       try { setStaffUser(JSON.parse(raw)); } catch {}
     }
@@ -31,8 +31,8 @@ export function StaffAuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     await staffApi.post('/auth/logout', {}).catch(() => {});
-    localStorage.removeItem('vf_staff_token');
-    localStorage.removeItem('vf_staff_user');
+    sessionStorage.removeItem('vf_staff_token');
+    sessionStorage.removeItem('vf_staff_user');
     setStaffUser(null);
     window.location.href = '/staff/login';
   };

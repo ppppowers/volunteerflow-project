@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -113,7 +113,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('vf_user');
+      const stored = sessionStorage.getItem('vf_user');
       if (stored) {
         const parsed = JSON.parse(stored) as { name?: string };
         if (parsed.name) setUserName(parsed.name.split(' ')[0]);

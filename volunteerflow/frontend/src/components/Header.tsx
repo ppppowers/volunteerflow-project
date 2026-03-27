@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Bell, Search, User, Moon, Sun, LogOut, MessageSquare } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
@@ -16,7 +16,7 @@ function getUserInfo(): UserInfo {
     return { name: 'Admin User', email: '' };
   }
   try {
-    const stored = localStorage.getItem('vf_user');
+    const stored = sessionStorage.getItem('vf_user');
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<UserInfo>;
       return {
@@ -43,9 +43,9 @@ export default function Header() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('vf_token');
-    localStorage.removeItem('vf_user');
-    localStorage.removeItem('vf_role');
+    sessionStorage.removeItem('vf_token');
+    sessionStorage.removeItem('vf_user');
+    sessionStorage.removeItem('vf_role');
     router.push('/landing');
   };
 

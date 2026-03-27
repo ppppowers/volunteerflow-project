@@ -1,4 +1,4 @@
-const BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'}/staff`;
+﻿const BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'}/staff`;
 
 export class StaffApiError extends Error {
   status: number;
@@ -12,7 +12,7 @@ export class StaffApiError extends Error {
 
 function getStaffToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('vf_staff_token');
+  return sessionStorage.getItem('vf_staff_token');
 }
 
 function getSupportSessionId(): string | null {
@@ -42,8 +42,8 @@ async function staffFetch(path: string, init: RequestInit = {}): Promise<unknown
   if (res.status === 401) {
     // Only redirect if we had a token (session expired), not during login itself
     if (token) {
-      localStorage.removeItem('vf_staff_token');
-      localStorage.removeItem('vf_staff_user');
+      sessionStorage.removeItem('vf_staff_token');
+      sessionStorage.removeItem('vf_staff_user');
       window.location.href = '/staff/login';
       return;
     }

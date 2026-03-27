@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StaffLayout } from '@/components/staff/StaffLayout';
 import { PermissionGate } from '@/components/staff/PermissionGate';
 
@@ -239,12 +239,12 @@ export default function StaffAuditPage() {
       params.set('page', String(page));
       params.set('limit', '20');
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem('vf_staff_token') : null;
+      const token = typeof window !== 'undefined' ? sessionStorage.getItem('vf_staff_token') : null;
       const res = await fetch(`/api/staff/audit?${params}`, {
         headers: { Authorization: `Bearer ${token ?? ''}` },
       });
       if (res.status === 401) {
-        localStorage.removeItem('vf_staff_token');
+        sessionStorage.removeItem('vf_staff_token');
         window.location.href = '/staff/login';
         return;
       }
@@ -278,7 +278,7 @@ export default function StaffAuditPage() {
       if (filters.to) params.set('to', filters.to);
       if (debouncedQ) params.set('q', debouncedQ);
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem('vf_staff_token') : null;
+      const token = typeof window !== 'undefined' ? sessionStorage.getItem('vf_staff_token') : null;
       const res = await fetch(`/api/staff/audit/export?${params}`, {
         headers: { Authorization: `Bearer ${token ?? ''}` },
       });

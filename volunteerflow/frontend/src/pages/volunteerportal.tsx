@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import Head from 'next/head';
 
 // ─── Portal API client (uses separate vp_token to avoid conflicts with staff auth) ──
@@ -7,7 +7,7 @@ const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api'
 const VP_TOKEN_KEY = 'vp_token';
 
 async function portalFetch<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem(VP_TOKEN_KEY) : null;
+  const token = typeof window !== 'undefined' ? sessionStorage.getItem(VP_TOKEN_KEY) : null;
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: {
@@ -143,7 +143,7 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
       const res = await portalFetch<{ token: string; user: { id: string; email: string; fullName: string } }>(
         'POST', '/auth/login', { email: email.trim().toLowerCase(), password }
       );
-      localStorage.setItem(VP_TOKEN_KEY, res.token);
+      sessionStorage.setItem(VP_TOKEN_KEY, res.token);
       // Fetch volunteer profile
       const profile = await portalApi.get<VolunteerProfile>('/portal/profile');
       onLogin(profile);
@@ -156,7 +156,7 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
       } else {
         setLoginError(msg);
       }
-      localStorage.removeItem(VP_TOKEN_KEY);
+      sessionStorage.removeItem(VP_TOKEN_KEY);
     } finally {
       setLoading(false);
     }
@@ -908,17 +908,17 @@ export default function VolunteerPortal() {
 
   // Restore session from localStorage on mount
   useEffect(() => {
-    const token = localStorage.getItem(VP_TOKEN_KEY);
+    const token = sessionStorage.getItem(VP_TOKEN_KEY);
     if (!token) return;
     portalApi.get<VolunteerProfile>('/portal/profile')
       .then(setProfile)
       .catch(() => {
-        localStorage.removeItem(VP_TOKEN_KEY);
+        sessionStorage.removeItem(VP_TOKEN_KEY);
       });
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem(VP_TOKEN_KEY);
+    sessionStorage.removeItem(VP_TOKEN_KEY);
     setProfile(null);
   };
 
