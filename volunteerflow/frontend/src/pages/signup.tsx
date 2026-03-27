@@ -5,6 +5,7 @@ import {
   Eye, EyeOff, Check, ArrowRight, Shield,
   Users, Clock, Zap, Star, ChevronRight,
 } from 'lucide-react';
+import { PLANS as PRICING_PLANS, getYearlySavings } from '@/lib/pricing.config';
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500;600;700&display=swap');
@@ -148,6 +149,13 @@ const styles = `
   .plan-opt-desc { font-size: 12px; color: #94a3b8; }
   .plan-opt-price { margin-left: auto; font-size: 14px; font-weight: 700; color: #0f172a; }
   .plan-opt-badge { font-size: 10px; font-weight: 700; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 2px 8px; border-radius: 99px; margin-left: 6px; }
+  .plan-opt-save { font-size: 10px; font-weight: 700; background: #fef3c7; color: #92400e; padding: 2px 7px; border-radius: 99px; margin-left: 6px; }
+
+  /* Billing toggle */
+  .billing-toggle { display: flex; align-items: center; gap: 0; background: #f1f5f9; border-radius: 8px; padding: 3px; margin-bottom: 14px; }
+  .billing-toggle-btn { flex: 1; padding: 7px 0; font-size: 12px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: all 0.18s; background: transparent; color: #64748b; font-family: 'DM Sans', sans-serif; }
+  .billing-toggle-btn.active { background: white; color: #0f172a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .billing-toggle-save { font-size: 10px; font-weight: 700; color: #059669; margin-left: 4px; }
 
   /* Submit button */
   .sp-submit {
@@ -225,10 +233,10 @@ interface FormErrors {
   [key: string]: string;
 }
 
-const PLANS = [
-  { id: 'discover', name: 'Discover', desc: 'Perfect for small teams getting started', price: '$49/mo', badge: null },
-  { id: 'grow', name: 'Grow', desc: 'Most popular for growing organizations', price: '$149/mo', badge: 'Most Popular' },
-  { id: 'enterprise', name: 'Enterprise', desc: 'For large organizations', price: 'Custom', badge: null },
+const SIGNUP_PLANS = [
+  { id: 'discover', name: 'Discover', desc: 'Perfect for small teams getting started', badge: null },
+  { id: 'grow',     name: 'Grow',     desc: 'Most popular for growing organizations', badge: 'Most Popular' },
+  { id: 'enterprise', name: 'Enterprise', desc: 'For large organizations',            badge: null },
 ];
 
 export default function SignupPage() {
@@ -239,6 +247,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState('');
   const [selectedPlan, setSelectedPlan] = useState('discover');
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [errors, setErrors] = useState<FormErrors>({});
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   const [wizardSaving, setWizardSaving] = useState(false);
@@ -300,6 +309,8 @@ export default function SignupPage() {
           email: form.email.trim(),
           password: form.password,
           orgName: form.orgName.trim(),
+          plan: selectedPlan,
+          billingCycle,
         }),
       });
       const json = await res.json();
@@ -684,26 +695,50 @@ export default function SignupPage() {
                 {/* Plan selector */}
                 <div style={{ marginBottom: 4 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 10 }}>Choose your plan</div>
-                  {PLANS.map((p) => (
-                    <button
-                      key={p.id}
-                      className={`plan-opt ${selectedPlan === p.id ? 'selected' : ''}`}
-                      onClick={() => setSelectedPlan(p.id)}
-                      type="button"
-                    >
-                      <div className={`plan-opt-radio`}>
-                        {selectedPlan === p.id && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'white' }} />}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span className="plan-opt-name">{p.name}</span>
-                          {p.badge && <span className="plan-opt-badge">{p.badge}</span>}
-                        </div>
-                        <div className="plan-opt-desc">{p.desc}</div>
-                      </div>
-                      <div className="plan-opt-price">{p.price}</div>
+
+                  {/* Billing cycle toggle */}
+                  <div className="billing-toggle">
+                    <button type="button" className={`billing-toggle-btn ${billingCycle === 'monthly' ? 'active' : ''}`} onClick={() => setBillingCycle('monthly')}>
+                      Monthly
                     </button>
-                  ))}
+                    <button type="button" className={`billing-toggle-btn ${billingCycle === 'yearly' ? 'active' : ''}`} onClick={() => setBillingCycle('yearly')}>
+                      Yearly <span className="billing-toggle-save">Save ~17%</span>
+                    </button>
+                  </div>
+
+                  {SIGNUP_PLANS.map((p) => {
+                    const pricing = PRICING_PLANS[p.id as keyof typeof PRICING_PLANS];
+                    const isEnterprise = p.id === 'enterprise';
+                    const monthlyEquiv = billingCycle === 'yearly' && pricing?.yearlyPrice
+                      ? Math.round(pricing.yearlyPrice / 12)
+                      : pricing?.monthlyPrice;
+                    const priceLabel = isEnterprise ? 'Custom' : billingCycle === 'yearly'
+                      ? `$${monthlyEquiv}/mo*`
+                      : `$${monthlyEquiv}/mo`;
+                    const savePct = !isEnterprise && pricing ? getYearlySavings(pricing) : 0;
+                    return (
+                      <button
+                        key={p.id}
+                        className={`plan-opt ${selectedPlan === p.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedPlan(p.id)}
+                        type="button"
+                      >
+                        <div className="plan-opt-radio">
+                          {selectedPlan === p.id && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'white' }} />}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span className="plan-opt-name">{p.name}</span>
+                            {p.badge && <span className="plan-opt-badge">{p.badge}</span>}
+                            {billingCycle === 'yearly' && savePct > 0 && <span className="plan-opt-save">Save {savePct}%</span>}
+                          </div>
+                          <div className="plan-opt-desc">{p.desc}</div>
+                        </div>
+                        <div className="plan-opt-price">{priceLabel}</div>
+                      </button>
+                    );
+                  })}
+                  {billingCycle === 'yearly' && <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6, marginBottom: 0 }}>* Billed annually</p>}
                 </div>
 
                 <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 16, lineHeight: 1.5 }}>
