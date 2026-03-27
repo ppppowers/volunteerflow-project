@@ -1,4 +1,5 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
 
 const securityHeaders = [
   {
@@ -28,6 +29,9 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  experimental: {
+    outputFileTracingRoot: path.join(__dirname, '../../'),
+  },
   async rewrites() {
     return [
       {
