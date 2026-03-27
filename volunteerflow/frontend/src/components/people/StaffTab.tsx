@@ -158,7 +158,8 @@ function StaffCard({ member, onSelect }: { member: StaffRow; onSelect: () => voi
     : '—';
 
   return (
-    <Card className="p-4 flex flex-col gap-3 hover:shadow-md transition-shadow cursor-pointer" onClick={onSelect}>
+    <div onClick={onSelect} className="cursor-pointer">
+    <Card className="p-4 flex flex-col gap-3 hover:shadow-md transition-shadow">
       {/* Avatar + name */}
       <div className="flex items-center gap-3">
         <div className="w-11 h-11 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center text-sm font-bold flex-shrink-0">
@@ -212,6 +213,7 @@ function StaffCard({ member, onSelect }: { member: StaffRow; onSelect: () => voi
         </button>
       </div>
     </Card>
+    </div>
   );
 }
 
