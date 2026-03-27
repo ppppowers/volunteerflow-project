@@ -122,14 +122,17 @@ function formatJoinDate(dateStr: string): string {
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
 function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }) {
+  const [mode, setMode]         = useState<'login' | 'setup'>('login');
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm]   = useState('');
   const [showPw, setShowPw]     = useState(false);
   const [errors, setErrors]     = useState<Record<string, string>>({});
   const [loading, setLoading]   = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [setupDone, setSetupDone]   = useState(false);
 
-  const submit = async () => {
+  const submitLogin = async () => {
     const e: Record<string, string> = {};
     if (!email) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Enter a valid email';
@@ -141,20 +144,20 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
     setLoginError('');
     try {
       const res = await portalFetch<{ token: string; user: { id: string; email: string; fullName: string } }>(
-        'POST', '/auth/login', { email: email.trim().toLowerCase(), password }
+        'POST', '/portal/login', { email: email.trim().toLowerCase(), password }
       );
       sessionStorage.setItem(VP_TOKEN_KEY, res.token);
-      // Fetch volunteer profile
       const profile = await portalApi.get<VolunteerProfile>('/portal/profile');
       onLogin(profile);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
-      if (msg.includes('profile not found')) {
+      if (msg === 'no_password') {
+        setLoginError('');
+        setMode('setup');
+      } else if (msg.includes('profile not found')) {
         setLoginError('No volunteer account found for this email. Contact your organization.');
-      } else if (msg.includes('Invalid email') || msg.includes('401')) {
-        setLoginError('Invalid email or password.');
       } else {
-        setLoginError(msg);
+        setLoginError('Invalid email or password.');
       }
       sessionStorage.removeItem(VP_TOKEN_KEY);
     } finally {
@@ -162,37 +165,112 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
     }
   };
 
-  return (
-    <div className="min-h-screen flex bg-neutral-50 dark:bg-neutral-950">
-      {/* Left panel */}
-      <div className="hidden md:flex md:w-[440px] lg:w-[480px] flex-shrink-0 bg-neutral-900 dark:bg-neutral-950 flex-col justify-end p-12 relative overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute -top-36 -left-24 w-[500px] h-[500px] rounded-full bg-primary-500 opacity-10" />
-          <div className="absolute bottom-20 -right-16 w-72 h-72 rounded-full bg-primary-400 opacity-10" />
+  const submitSetup = async () => {
+    const e: Record<string, string> = {};
+    if (!email) e.email = 'Email is required';
+    if (password.length < 8) e.password = 'Password must be at least 8 characters';
+    if (password !== confirm) e.confirm = 'Passwords do not match';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+
+    setLoading(true);
+    setLoginError('');
+    try {
+      await portalFetch('POST', '/portal/setup-password', { email: email.trim().toLowerCase(), password });
+      setSetupDone(true);
+      setMode('login');
+      setPassword('');
+      setConfirm('');
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : 'Failed to set password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const leftPanel = (
+    <div className="hidden md:flex md:w-[440px] lg:w-[480px] flex-shrink-0 bg-neutral-900 dark:bg-neutral-950 flex-col justify-end p-12 relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-36 -left-24 w-[500px] h-[500px] rounded-full bg-primary-500 opacity-10" />
+        <div className="absolute bottom-20 -right-16 w-72 h-72 rounded-full bg-primary-400 opacity-10" />
+      </div>
+      <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+      <div className="relative z-10">
+        <div className="inline-flex items-center gap-2 mb-6 px-3 py-1.5 rounded-full border border-white/15 bg-white/10 text-white/70 text-xs font-semibold uppercase tracking-wider">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary-400" />
+          Volunteer Portal
         </div>
-        <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-        <div className="relative z-10">
-          <div className="inline-flex items-center gap-2 mb-6 px-3 py-1.5 rounded-full border border-white/15 bg-white/10 text-white/70 text-xs font-semibold uppercase tracking-wider">
-            <div className="w-1.5 h-1.5 rounded-full bg-primary-400" />
-            Volunteer Portal
-          </div>
-          <h1 className="text-4xl font-bold text-white leading-tight mb-4">
-            Make a <span className="text-primary-400 italic">real</span> difference<br />in your community.
-          </h1>
-          <p className="text-white/55 text-[15px] leading-relaxed mb-10">
-            Sign in to access your upcoming events, track your hours, and connect with your nonprofit team.
-          </p>
-          <div className="flex gap-8 pt-8 border-t border-white/10">
-            {[['3,200+', 'Active volunteers'], ['48k', 'Hours contributed'], ['890', 'Events completed']].map(([val, label]) => (
-              <div key={label}>
-                <div className="text-2xl font-bold text-white">{val}</div>
-                <div className="text-xs text-white/45 font-medium mt-0.5">{label}</div>
+        <h1 className="text-4xl font-bold text-white leading-tight mb-4">
+          Make a <span className="text-primary-400 italic">real</span> difference<br />in your community.
+        </h1>
+        <p className="text-white/55 text-[15px] leading-relaxed mb-10">
+          Sign in to access your upcoming events, track your hours, and connect with your nonprofit team.
+        </p>
+        <div className="flex gap-8 pt-8 border-t border-white/10">
+          {[['3,200+', 'Active volunteers'], ['48k', 'Hours contributed'], ['890', 'Events completed']].map(([val, label]) => (
+            <div key={label}>
+              <div className="text-2xl font-bold text-white">{val}</div>
+              <div className="text-xs text-white/45 font-medium mt-0.5">{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (mode === 'setup') {
+    return (
+      <div className="min-h-screen flex bg-neutral-50 dark:bg-neutral-950">
+        {leftPanel}
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="w-full max-w-[420px]">
+            <div className="flex items-center gap-2.5 mb-10">
+              <div className="w-9 h-9 bg-primary-600 dark:bg-primary-500 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-sm">V</span>
               </div>
-            ))}
+              <span className="text-neutral-900 dark:text-neutral-100 font-bold text-lg">VolunteerFlow</span>
+            </div>
+            <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-2">Create your password</h2>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Set a password for <strong>{email}</strong> to access the portal.</p>
+            {loginError && (
+              <div className="mb-4 p-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-300 text-sm">{loginError}</div>
+            )}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">New Password</label>
+              <div className="relative">
+                <input type={showPw ? 'text' : 'password'} placeholder="At least 8 characters" value={password}
+                  onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitSetup()}
+                  className={`${inputCls} pr-10${errors.password ? ' !border-danger-500 !ring-danger-500/30' : ''}`} />
+                <button type="button" onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300">
+                  <EyeIcon open={showPw} />
+                </button>
+              </div>
+              {errors.password && <p className="mt-1 text-xs text-danger-500 dark:text-danger-400">{errors.password}</p>}
+            </div>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">Confirm Password</label>
+              <input type="password" placeholder="Repeat your password" value={confirm}
+                onChange={e => setConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitSetup()}
+                className={`${inputCls}${errors.confirm ? ' !border-danger-500 !ring-danger-500/30' : ''}`} />
+              {errors.confirm && <p className="mt-1 text-xs text-danger-500 dark:text-danger-400">{errors.confirm}</p>}
+            </div>
+            <button type="button" onClick={submitSetup} disabled={loading}
+              className="w-full py-2.5 px-4 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors mb-3">
+              {loading ? 'Setting up…' : 'Create Password →'}
+            </button>
+            <button type="button" onClick={() => { setMode('login'); setLoginError(''); }}
+              className="w-full text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 text-center">
+              Back to sign in
+            </button>
           </div>
         </div>
       </div>
+    );
+  }
 
+  return (
+    <div className="min-h-screen flex bg-neutral-50 dark:bg-neutral-950">
+      {leftPanel}
       {/* Right: form */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-[420px]">
@@ -206,10 +284,11 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
           <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-2">Welcome back</h2>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Sign in to your volunteer account to get started.</p>
 
-          <div className="flex gap-2.5 p-3 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-300 text-sm mb-6">
-            <span className="mt-0.5 flex-shrink-0">ℹ️</span>
-            <span>Volunteer accounts are created automatically after your application is reviewed and approved.</span>
-          </div>
+          {setupDone && (
+            <div className="mb-4 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 text-sm">
+              Password created! Sign in below.
+            </div>
+          )}
 
           {loginError && (
             <div className="mb-4 p-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-300 text-sm">
@@ -219,28 +298,18 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
 
           <div className="mb-4">
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">Email Address</label>
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && submit()}
-              className={`${inputCls}${errors.email ? ' !border-danger-500 !ring-danger-500/30' : ''}`}
-            />
+            <input type="email" placeholder="you@example.com" value={email}
+              onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitLogin()}
+              className={`${inputCls}${errors.email ? ' !border-danger-500 !ring-danger-500/30' : ''}`} />
             {errors.email && <p className="mt-1 text-xs text-danger-500 dark:text-danger-400">{errors.email}</p>}
           </div>
 
           <div className="mb-6">
             <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">Password</label>
             <div className="relative">
-              <input
-                type={showPw ? 'text' : 'password'}
-                placeholder="Enter your password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && submit()}
-                className={`${inputCls} pr-10${errors.password ? ' !border-danger-500 !ring-danger-500/30' : ''}`}
-              />
+              <input type={showPw ? 'text' : 'password'} placeholder="Enter your password" value={password}
+                onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitLogin()}
+                className={`${inputCls} pr-10${errors.password ? ' !border-danger-500 !ring-danger-500/30' : ''}`} />
               <button type="button" onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300">
                 <EyeIcon open={showPw} />
               </button>
@@ -248,14 +317,18 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
             {errors.password && <p className="mt-1 text-xs text-danger-500 dark:text-danger-400">{errors.password}</p>}
           </div>
 
-          <button
-            type="button"
-            onClick={submit}
-            disabled={loading}
-            className="w-full py-2.5 px-4 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
-          >
+          <button type="button" onClick={submitLogin} disabled={loading}
+            className="w-full py-2.5 px-4 bg-primary-600 dark:bg-primary-500 hover:bg-primary-700 dark:hover:bg-primary-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors mb-4">
             {loading ? 'Signing in…' : 'Sign In →'}
           </button>
+
+          <p className="text-center text-sm text-neutral-500 dark:text-neutral-400">
+            First time?{' '}
+            <button type="button" onClick={() => { setMode('setup'); setLoginError(''); setErrors({}); }}
+              className="text-primary-600 dark:text-primary-400 font-semibold hover:underline">
+              Create your password
+            </button>
+          </p>
         </div>
       </div>
     </div>

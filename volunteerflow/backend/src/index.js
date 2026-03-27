@@ -3115,6 +3115,54 @@ function mapPortalSettings(row) {
 
 // Public — no auth needed (volunteers/members need to access the portal HTML)
 // portal_settings PK is org_id + ':' + portal_type. Public reads return first matching row (single-tenant installs).
+// ── Volunteer Portal Auth ─────────────────────────────────────────────────────
+
+app.post('/api/portal/login', writeLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ success: false, error: 'Email and password are required' });
+    const { rows } = await pool.query(
+      'SELECT * FROM volunteers WHERE LOWER(email) = $1 LIMIT 1',
+      [email.trim().toLowerCase()]
+    );
+    const vol = rows[0];
+    if (!vol) return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    if (!vol.password_hash) return res.status(401).json({ success: false, error: 'no_password' });
+    if (!(await bcrypt.compare(password, vol.password_hash))) {
+      return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    }
+    const token = jwt.sign(
+      { sub: vol.id, email: vol.email, fullName: `${vol.first_name} ${vol.last_name}`.trim(), role: 'volunteer', orgId: vol.org_id },
+      JWT_SECRET, { expiresIn: JWT_EXPIRES_IN }
+    );
+    res.json({ success: true, data: { token, user: { id: vol.id, email: vol.email, fullName: `${vol.first_name} ${vol.last_name}`.trim() } } });
+  } catch (err) {
+    console.error('Portal login error:', err.message);
+    res.status(500).json({ success: false, error: 'Login failed' });
+  }
+});
+
+app.post('/api/portal/setup-password', writeLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ success: false, error: 'Email and password are required' });
+    if (password.length < 8) return res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+    const { rows } = await pool.query(
+      'SELECT * FROM volunteers WHERE LOWER(email) = $1 LIMIT 1',
+      [email.trim().toLowerCase()]
+    );
+    const vol = rows[0];
+    if (!vol) return res.status(404).json({ success: false, error: 'No volunteer account found for this email' });
+    if (vol.password_hash) return res.status(400).json({ success: false, error: 'Password already set. Use the sign in form.' });
+    const hash = await bcrypt.hash(password, 12);
+    await pool.query('UPDATE volunteers SET password_hash = $1 WHERE id = $2', [hash, vol.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Portal setup-password error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to set password' });
+  }
+});
+
 app.get('/api/portal/settings/:type', async (req, res) => {
   const { type } = req.params;
   if (!PORTAL_TYPES.has(type)) return res.status(400).json({ error: 'Invalid portal type' });
