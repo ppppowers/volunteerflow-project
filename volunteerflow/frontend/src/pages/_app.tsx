@@ -3,6 +3,7 @@ import type { AppProps } from 'next/app';
 import { Inter } from 'next/font/google';
 import { useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
+import { Analytics } from '@vercel/analytics/react';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { PlanProvider } from '@/context/usePlan';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -106,6 +107,7 @@ export default function App({ Component, pageProps }: AppProps) {
                     },
                   }}
                 />
+                <Analytics />
               </ErrorBoundary>
             </PlanProvider>
           </ThemeProvider>
