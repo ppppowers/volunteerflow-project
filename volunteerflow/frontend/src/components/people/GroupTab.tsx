@@ -461,7 +461,8 @@ export function GroupTab({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((m) => (
             <div key={m.id} className="group relative">
-              <Card className="p-4 flex flex-col gap-3 cursor-pointer hover:shadow-md transition-shadow" onClick={() => router.push(`/people/groups/${group.id}/${m.id}`)}>
+              <div className="cursor-pointer" onClick={() => router.push(`/people/groups/${group.id}/${m.id}`)}>
+              <Card className="p-4 flex flex-col gap-3 hover:shadow-md transition-shadow">
                 {/* Avatar + name */}
                 <div className="flex items-start gap-3">
                   <div
@@ -534,6 +535,7 @@ export function GroupTab({
                   <p className="text-xs text-neutral-400 dark:text-neutral-500 line-clamp-2">{m.notes}</p>
                 )}
               </Card>
+              </div>
             </div>
           ))}
         </div>
