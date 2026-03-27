@@ -164,7 +164,7 @@ function NewGroupModal({
         <div className="flex items-center justify-between p-5 border-b border-neutral-200 dark:border-neutral-700">
           <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">New Group</h2>
           <button
-            onClick={onClose}
+            onClick={() => onClose()}
             className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-400 transition-colors"
           >
             <X className="w-4 h-4" />
