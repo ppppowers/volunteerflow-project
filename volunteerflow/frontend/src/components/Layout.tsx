@@ -21,7 +21,7 @@ export default function Layout({ children }: LayoutProps) {
   function orgLogout() {
     localStorage.removeItem('vf_token');
     localStorage.removeItem('vf_user');
-    window.location.href = '/landing?mode=signin';
+    window.location.href = '/landing';
   }
 
   const { isWarning, secondsLeft, reset } = useIdleTimer({
