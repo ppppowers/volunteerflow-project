@@ -122,10 +122,10 @@ export default function PaymentGatewayModal({
           </p>
           {PAYPAL_CLIENT_ID ? (
             <PayPalScriptProvider
-              options={{ clientId: PAYPAL_CLIENT_ID, vault: true, intent: 'subscription' }}
+              options={{ clientId: PAYPAL_CLIENT_ID, vault: true, intent: 'subscription', 'data-sdk-integration-source': 'button-factory' }}
             >
               <PayPalButtons
-                style={{ layout: 'horizontal', color: 'blue', shape: 'rect', label: 'subscribe' }}
+                style={{ layout: 'horizontal', color: 'blue', shape: 'pill', label: 'paypal' }}
                 createSubscription={async (_data, actions) => {
                   const { planId } = await api.get<{ planId: string }>(
                     `/billing/paypal/plan-id?plan=${plan}&cycle=${billingCycle}`
