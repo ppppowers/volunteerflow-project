@@ -231,7 +231,7 @@ export default function VolunteerDetail() {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-4">
-            <Link href="/volunteers"><Button variant="outline" size="sm"><ArrowLeft className="w-4 h-4 mr-2" />Back to Volunteers</Button></Link>
+            <Button variant="outline" size="sm" onClick={() => router.back()}><ArrowLeft className="w-4 h-4 mr-2" />Back to Volunteers</Button>
             <div>
               <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{isEditing ? 'Edit Volunteer' : 'Volunteer Profile'}</h1>
               <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1 flex items-center gap-2"><Hash className="w-3 h-3" />{volunteer.volunteerId}</p>
