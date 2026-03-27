@@ -20,7 +20,7 @@ function staffHelpRouter(pool) {
   // POST / — create a new item
   router.post('/', requireStaffAuth(pool), async (req, res) => {
     try {
-      const { type, title, body, category, sort_order, published } = req.body;
+      const { type, title, body, category, sort_order, published, video_url } = req.body;
       if (!['faq', 'article'].includes(type)) {
         return res.status(400).json({ error: 'type must be faq or article' });
       }
@@ -28,8 +28,8 @@ function staffHelpRouter(pool) {
         return res.status(400).json({ error: 'title is required' });
       }
       const result = await pool.query(
-        `INSERT INTO help_content (type, title, body, category, sort_order, published)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO help_content (type, title, body, category, sort_order, published, video_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
         [
           type,
@@ -38,6 +38,7 @@ function staffHelpRouter(pool) {
           (category || '').trim() || null,
           sort_order ?? 0,
           published ?? false,
+          (video_url || '').trim() || null,
         ]
       );
       res.status(201).json({ success: true, data: result.rows[0] });
@@ -51,7 +52,7 @@ function staffHelpRouter(pool) {
   router.put('/:id', requireStaffAuth(pool), async (req, res) => {
     try {
       const { id } = req.params;
-      const { type, title, body, category, sort_order, published } = req.body;
+      const { type, title, body, category, sort_order, published, video_url } = req.body;
       if (!['faq', 'article'].includes(type)) {
         return res.status(400).json({ error: 'type must be faq or article' });
       }
@@ -66,6 +67,7 @@ function staffHelpRouter(pool) {
              category   = $5,
              sort_order = $6,
              published  = $7,
+             video_url  = $8,
              updated_at = NOW()
          WHERE id = $1
          RETURNING *`,
@@ -77,6 +79,7 @@ function staffHelpRouter(pool) {
           (category || '').trim() || null,
           sort_order ?? 0,
           published ?? false,
+          (video_url || '').trim() || null,
         ]
       );
       if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });

@@ -13,6 +13,7 @@ interface HelpItem {
   category: string | null;
   sort_order: number;
   published: boolean;
+  video_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +37,7 @@ function HelpItemModal({ item, onClose, onSaved }: ModalProps) {
     category: item?.category ?? '',
     sort_order: item?.sort_order ?? 0,
     published: item?.published ?? false,
+    video_url: item?.video_url ?? '',
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -161,6 +163,22 @@ function HelpItemModal({ item, onClose, onSaved }: ModalProps) {
               />
             </div>
           </div>
+
+          {/* Video URL (articles only) */}
+          {form.type === 'article' && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 mb-1.5">
+                Video URL <span className="font-normal text-gray-600">(YouTube or Vimeo — optional)</span>
+              </label>
+              <input
+                type="url"
+                value={form.video_url}
+                onChange={(e) => set('video_url', e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+          )}
 
           {/* Published */}
           <label className="flex items-center gap-2.5 cursor-pointer">

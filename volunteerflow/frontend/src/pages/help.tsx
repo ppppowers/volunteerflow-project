@@ -14,6 +14,30 @@ interface HelpItem {
   body: string;
   category: string | null;
   sort_order: number;
+  video_url: string | null;
+}
+
+function toEmbedUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    // YouTube: youtube.com/watch?v=ID or youtu.be/ID
+    if (u.hostname.includes('youtube.com')) {
+      const id = u.searchParams.get('v');
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (u.hostname === 'youtu.be') {
+      const id = u.pathname.slice(1);
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    // Vimeo: vimeo.com/ID
+    if (u.hostname.includes('vimeo.com')) {
+      const id = u.pathname.slice(1);
+      return id ? `https://player.vimeo.com/video/${id}` : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── FAQ Accordion ────────────────────────────────────────────────────────────
@@ -124,8 +148,23 @@ function ArticlesSection({ items }: { items: HelpItem[] }) {
                 </span>
               </button>
               {isOpen && (
-                <div id={`article-panel-${item.id}`} className="px-5 pb-5 border-t border-neutral-100 dark:border-neutral-800 pt-4 text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed whitespace-pre-wrap">
-                  {item.body}
+                <div id={`article-panel-${item.id}`} className="px-5 pb-5 border-t border-neutral-100 dark:border-neutral-800 pt-4 space-y-4">
+                  {item.video_url && toEmbedUrl(item.video_url) && (
+                    <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                      <iframe
+                        src={toEmbedUrl(item.video_url)!}
+                        className="absolute inset-0 w-full h-full rounded-lg"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        title={item.title}
+                      />
+                    </div>
+                  )}
+                  {item.body && (
+                    <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed whitespace-pre-wrap">
+                      {item.body}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
