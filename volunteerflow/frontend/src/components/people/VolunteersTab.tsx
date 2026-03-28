@@ -15,6 +15,8 @@ import {
   Copy,
   Check,
   FileText,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
@@ -92,6 +94,8 @@ export function VolunteersTab({
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'pending'>('all');
   const [copied, setCopied] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api.get<ApiVolunteerItem[]>('/volunteers?limit=100')
@@ -99,6 +103,19 @@ export function VolunteersTab({
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
+    try {
+      await api.delete(`/volunteers/${id}`);
+      setVolunteers((prev) => prev.filter((v) => v.id !== id));
+      setConfirmDeleteId(null);
+    } catch {
+      // keep confirm open so user can retry
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const signupUrl = (() => {
     const base = typeof window !== 'undefined' ? window.location.origin : '';
@@ -291,15 +308,45 @@ export function VolunteersTab({
                 </div>
               )}
 
-              {/* View profile link */}
+              {/* Footer: view profile + remove */}
               <div className="pt-1 border-t border-neutral-100 dark:border-neutral-700">
-                <Link
-                  href={`/volunteers/${v.id}`}
-                  className="flex items-center gap-1 text-sm font-semibold text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
-                >
-                  View Profile
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </Link>
+                {confirmDeleteId === v.id ? (
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-danger-500 flex-shrink-0" />
+                    <span className="text-xs text-neutral-600 dark:text-neutral-400 flex-1">Remove volunteer?</span>
+                    <button
+                      onClick={() => handleDelete(v.id)}
+                      disabled={deleting}
+                      className="px-2.5 py-1 text-xs font-semibold bg-danger-600 hover:bg-danger-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+                    >
+                      {deleting ? '…' : 'Confirm'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      disabled={deleting}
+                      className="px-2.5 py-1 text-xs font-semibold border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <Link
+                      href={`/volunteers/${v.id}`}
+                      className="flex items-center gap-1 text-sm font-semibold text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
+                    >
+                      View Profile
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </Link>
+                    <button
+                      onClick={() => setConfirmDeleteId(v.id)}
+                      className="p-1.5 text-neutral-400 hover:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-900/20 rounded-lg transition-colors"
+                      title="Remove volunteer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             </Card>
           ))}
