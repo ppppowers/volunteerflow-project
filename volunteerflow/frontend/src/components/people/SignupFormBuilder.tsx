@@ -162,22 +162,38 @@ interface FieldRowProps {
   onChange: (updated: FormField) => void;
   onDelete: () => void;
   onMove: (dir: 'up' | 'down') => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
+  onDragStart?: () => void;
+  onDragOver?: () => void;
+  onDrop?: () => void;
 }
 
-function FieldRow({ field, index, total, onChange, onDelete, onMove }: FieldRowProps) {
+function FieldRow({ field, index, total, onChange, onDelete, onMove, isDragging, isDragOver, onDragStart, onDragOver, onDrop }: FieldRowProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div
-      className={`border rounded-xl transition-colors ${
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(); }}
+      onDragOver={(e) => { e.preventDefault(); onDragOver?.(); }}
+      onDrop={(e) => { e.preventDefault(); onDrop?.(); }}
+      onDragEnd={() => onDrop?.()}
+      className={`border rounded-xl transition-all ${
+        isDragging ? 'opacity-40 scale-95' : ''
+      } ${
+        isDragOver ? 'ring-2 ring-primary-400 dark:ring-primary-500' : ''
+      } ${
         field.enabled
           ? 'border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800'
           : 'border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 opacity-60'
       }`}
     >
       <div className="flex items-center gap-2 px-3 py-2.5">
-        {/* Drag handle (decorative) */}
-        <GripVertical className="w-4 h-4 text-neutral-300 dark:text-neutral-600 flex-shrink-0" />
+        {/* Drag handle */}
+        <span title="Drag to reorder" className="cursor-grab active:cursor-grabbing">
+          <GripVertical className="w-4 h-4 text-neutral-300 dark:text-neutral-600 flex-shrink-0" />
+        </span>
 
         {/* Enabled toggle */}
         <button
@@ -326,6 +342,8 @@ export function SignupFormBuilder({ type, label, onClose }: SignupFormBuilderPro
   const [fields, setFields] = useState<FormField[]>([...config.fields]);
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   const updateField = (index: number, updated: FormField) => {
     setFields((prev) => prev.map((f, i) => (i === index ? updated : f)));
@@ -341,6 +359,18 @@ export function SignupFormBuilder({ type, label, onClose }: SignupFormBuilderPro
       const target = dir === 'up' ? index - 1 : index + 1;
       if (target < 0 || target >= next.length) return next;
       [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
+  const reorderField = (fromId: string, toId: string) => {
+    setFields((prev) => {
+      const next = [...prev];
+      const fromIdx = next.findIndex((f) => f.id === fromId);
+      const toIdx   = next.findIndex((f) => f.id === toId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
       return next;
     });
   };
@@ -463,6 +493,15 @@ export function SignupFormBuilder({ type, label, onClose }: SignupFormBuilderPro
                   onChange={(updated) => updateField(idx, updated)}
                   onDelete={() => deleteField(idx)}
                   onMove={(dir) => moveField(idx, dir)}
+                  isDragging={dragId === field.id}
+                  isDragOver={dragOverId === field.id}
+                  onDragStart={() => setDragId(field.id)}
+                  onDragOver={() => setDragOverId(field.id)}
+                  onDrop={() => {
+                    if (dragId && dragId !== field.id) reorderField(dragId, field.id);
+                    setDragId(null);
+                    setDragOverId(null);
+                  }}
                 />
               ))}
             </div>
