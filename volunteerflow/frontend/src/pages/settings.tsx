@@ -167,9 +167,26 @@ function OrganizationTab() {
     taxId: '',
   });
 
+  // Logo & identity (moved from Branding tab)
+  const [logoPreview, setLogoPreview] = useState('');
+  const logoRef = useRef<HTMLInputElement>(null);
+  const [brandingForm, setBrandingForm] = useState({
+    portalName: '', subdomain: '',
+    primaryColor: '#10b981', accentColor: '#0d9488',
+    welcomeHeading: '', welcomeSubtext: '', footerText: '', showPoweredBy: true,
+  });
+
   useEffect(() => {
-    api.get<Record<string, string>>('/settings')
-      .then((data) => {
+    Promise.allSettled([
+      api.get<Record<string, string>>('/settings'),
+      api.get<{
+        portalName: string; subdomain: string; primaryColor: string; accentColor: string;
+        welcomeHeading: string; welcomeSubtext: string; footerText: string;
+        showPoweredBy: boolean; logoBase64: string;
+      }>('/branding'),
+    ]).then(([settingsResult, brandingResult]) => {
+      if (settingsResult.status === 'fulfilled') {
+        const data = settingsResult.value;
         setForm((f) => ({
           ...f,
           orgName:     data.orgName     || '',
@@ -182,18 +199,46 @@ function OrganizationTab() {
           description: data.description || '',
           taxId:       data.taxId       || '',
         }));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      }
+      if (brandingResult.status === 'fulfilled') {
+        const d = brandingResult.value;
+        setBrandingForm({
+          portalName: d.portalName, subdomain: d.subdomain, primaryColor: d.primaryColor,
+          accentColor: d.accentColor, welcomeHeading: d.welcomeHeading,
+          welcomeSubtext: d.welcomeSubtext, footerText: d.footerText, showPoweredBy: d.showPoweredBy,
+        });
+        if (d.logoBase64) setLogoPreview(d.logoBase64);
+      }
+    }).finally(() => setLoading(false));
   }, []);
 
   const set = (k: string) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const MAX = 512;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      setLogoPreview(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.src = objectUrl;
+  };
 
   const handleSave = async () => {
     setSaving(true);
     setSaveError('');
     try {
       await api.put('/settings', form);
+      // Branding save is best-effort; silently ignored on plans without branding access
+      await api.put('/branding', { ...brandingForm, logoBase64: logoPreview }).catch(() => {});
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: unknown) {
@@ -214,7 +259,7 @@ function OrganizationTab() {
   return (
     <div className="space-y-6">
       <Card className="p-6">
-        <SectionTitle title="Organization Identity" subtitle="Your organization's basic information. Manage logos and portal branding in the Branding tab." />
+        <SectionTitle title="Organization Identity" subtitle="Your organization's basic information." />
         <div className="space-y-4 mb-6 pb-6 border-b border-neutral-100 dark:border-neutral-700">
           <Field label="Organization Name">
             <input type="text" value={form.orgName} onChange={(e) => set('orgName')(e.target.value)} className={inputClass} />
@@ -253,6 +298,61 @@ function OrganizationTab() {
           </Field>
         </div>
       </Card>
+
+      <PlanGate feature="custom_branding">
+        <Card className="p-6">
+          <SectionTitle title="Logo & Identity" subtitle="Customize how your organization appears in the volunteer portal" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-3">Organization Logo</label>
+              <div
+                onClick={() => logoRef.current?.click()}
+                className="flex flex-col items-center justify-center border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl p-6 cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 transition-colors"
+              >
+                {logoPreview ? (
+                  <img src={logoPreview} alt="Logo" className="max-h-20 object-contain mb-2" />
+                ) : (
+                  <>
+                    <Upload className="w-8 h-8 text-neutral-300 dark:text-neutral-600 mb-2" />
+                    <p className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Upload logo</p>
+                    <p className="text-xs text-neutral-400 mt-1">PNG or SVG · 400×100px recommended</p>
+                  </>
+                )}
+                <input ref={logoRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+              </div>
+              {logoPreview && (
+                <button onClick={() => setLogoPreview('')} className="mt-2 text-xs text-danger-500 dark:text-danger-400 hover:underline flex items-center gap-1">
+                  <X className="w-3 h-3" /> Remove logo
+                </button>
+              )}
+            </div>
+            <div className="space-y-4">
+              <Field label="Portal Name">
+                <input
+                  type="text"
+                  value={brandingForm.portalName}
+                  placeholder="e.g. Green Future Volunteer Hub"
+                  onChange={(e) => setBrandingForm((b) => ({ ...b, portalName: e.target.value }))}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Portal URL Subdomain" hint={brandingForm.subdomain ? `Volunteers will visit: ${brandingForm.subdomain}.volunteerflow.app` : 'Choose a unique subdomain for your volunteer portal'}>
+                <div className="flex items-center border border-neutral-300 dark:border-neutral-600 rounded-lg overflow-hidden bg-white dark:bg-neutral-700">
+                  <span className="px-3 py-2.5 text-sm text-neutral-400 bg-neutral-50 dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-600 whitespace-nowrap">https://</span>
+                  <input
+                    type="text"
+                    value={brandingForm.subdomain}
+                    placeholder="your-org-name"
+                    onChange={(e) => setBrandingForm((b) => ({ ...b, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))}
+                    className="flex-1 px-3 py-2.5 text-sm bg-transparent text-neutral-900 dark:text-neutral-100 outline-none"
+                  />
+                  <span className="px-3 py-2.5 text-sm text-neutral-400 bg-neutral-50 dark:bg-neutral-800 border-l border-neutral-200 dark:border-neutral-600 whitespace-nowrap">.volunteerflow.app</span>
+                </div>
+              </Field>
+            </div>
+          </div>
+        </Card>
+      </PlanGate>
 
       <Card className="p-6">
         <SectionTitle title="Regional Settings" />
@@ -1632,7 +1732,6 @@ function BrandingTab() {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [logoPreview, setLogoPreview] = useState('');
-  const logoRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     portalName: '',
     subdomain: '',
@@ -1660,24 +1759,6 @@ function BrandingTab() {
   }, []);
 
   const set = (k: string) => (v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      const MAX = 512;
-      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
-      setLogoPreview(canvas.toDataURL('image/jpeg', 0.85));
-    };
-    img.src = objectUrl;
-  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -1722,61 +1803,6 @@ function BrandingTab() {
           {saveError}
         </div>
       )}
-      {/* Logo */}
-      <Card className="p-6">
-        <SectionTitle title="Logo & Identity" subtitle="Customize how your organization appears in the volunteer portal" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-3">Organization Logo</label>
-            <div
-              onClick={() => logoRef.current?.click()}
-              className="flex flex-col items-center justify-center border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-xl p-6 cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 transition-colors"
-            >
-              {logoPreview ? (
-                <img src={logoPreview} alt="Logo" className="max-h-20 object-contain mb-2" />
-              ) : (
-                <>
-                  <Upload className="w-8 h-8 text-neutral-300 dark:text-neutral-600 mb-2" />
-                  <p className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Upload logo</p>
-                  <p className="text-xs text-neutral-400 mt-1">PNG or SVG · 400×100px recommended</p>
-                </>
-              )}
-              <input ref={logoRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-            </div>
-            {logoPreview && (
-              <button onClick={() => setLogoPreview('')} className="mt-2 text-xs text-danger-500 dark:text-danger-400 hover:underline flex items-center gap-1">
-                <X className="w-3 h-3" /> Remove logo
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            <Field label="Portal Name">
-              <input
-                type="text"
-                value={form.portalName}
-                placeholder="e.g. Green Future Volunteer Hub"
-                onChange={(e) => set('portalName')(e.target.value)}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Portal URL Subdomain" hint={form.subdomain ? `Volunteers will visit: ${form.subdomain}.volunteerflow.app` : 'Choose a unique subdomain for your volunteer portal'}>
-              <div className="flex items-center border border-neutral-300 dark:border-neutral-600 rounded-lg overflow-hidden bg-white dark:bg-neutral-700">
-                <span className="px-3 py-2.5 text-sm text-neutral-400 bg-neutral-50 dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-600 whitespace-nowrap">https://</span>
-                <input
-                  type="text"
-                  value={form.subdomain}
-                  placeholder="your-org-name"
-                  onChange={(e) => set('subdomain')(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  className="flex-1 px-3 py-2.5 text-sm bg-transparent text-neutral-900 dark:text-neutral-100 outline-none"
-                />
-                <span className="px-3 py-2.5 text-sm text-neutral-400 bg-neutral-50 dark:bg-neutral-800 border-l border-neutral-200 dark:border-neutral-600 whitespace-nowrap">.volunteerflow.app</span>
-              </div>
-            </Field>
-          </div>
-        </div>
-      </Card>
-
       {/* Portal Link */}
       <Card className="p-6">
         <SectionTitle title="Volunteer Portal Link" subtitle="Share this link with volunteers to access their portal" />
