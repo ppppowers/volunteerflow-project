@@ -39,7 +39,12 @@ import {
   ExternalLink,
   Check,
   Users,
+  UserCheck,
+  Crown,
+  Edit,
 } from 'lucide-react';
+import { SignupFormBuilder } from '@/components/people/SignupFormBuilder';
+import { signupFormConfigs } from '@/lib/signupForms';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -94,7 +99,7 @@ interface Submission {
   answers: Record<string, string | string[] | boolean>;
 }
 
-type PageView = 'templates' | 'builder' | 'submissions' | 'submission_detail';
+type PageView = 'templates' | 'builder' | 'submissions' | 'submission_detail' | 'signup_forms';
 
 interface GroupItem {
   id: string;
@@ -520,6 +525,10 @@ export default function Applications() {
   const [inviteSubject, setInviteSubject] = useState<{ name: string; email: string } | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
 
+  // Signup forms tab
+  const [sfEditing, setSfEditing] = useState<{ type: string; label: string } | null>(null);
+  const [sfFieldCounts, setSfFieldCounts] = useState<Record<string, { active: number; total: number }>>({});
+
   // Fetch templates and groups from backend on mount
   useEffect(() => {
     let cancelled = false;
@@ -817,43 +826,133 @@ export default function Applications() {
 
   // ── Renders ──────────────────────────────────────────────────────────────
 
-  /** TAB BAR (Templates / Submissions) */
+  /** TAB BAR (Templates / Submissions / Signup Forms) */
   const renderTabs = () => (
     <div className="flex gap-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg p-1 w-fit">
-      {(['templates', 'submissions'] as const).map((tab) => {
-        const isActive = view === tab || (view === 'submission_detail' && tab === 'submissions');
-        return (
-          <button
-            key={tab}
-            onClick={() => {
-              setView(tab);
-              setActiveSubmission(null);
-            }}
-            className={`px-4 py-2 rounded-md text-sm font-medium capitalize transition-colors ${
-              isActive
-                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
-            }`}
-          >
-            {tab === 'templates' ? (
-              <span className="inline-flex items-center gap-1.5">
-                <ClipboardList className="w-4 h-4" />
-                Form Templates
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5">
-                <FileText className="w-4 h-4" />
-                Submissions
-                {stats.pending > 0 && (
-                  <span className="ml-1 bg-warning-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                    {stats.pending}
-                  </span>
-                )}
-              </span>
-            )}
-          </button>
-        );
-      })}
+      <button
+        onClick={() => { setView('templates'); setActiveSubmission(null); }}
+        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+          view === 'templates' || view === 'builder'
+            ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+        }`}
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <ClipboardList className="w-4 h-4" />
+          Form Templates
+        </span>
+      </button>
+
+      <button
+        onClick={() => { setView('submissions'); setActiveSubmission(null); }}
+        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+          view === 'submissions' || view === 'submission_detail'
+            ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+        }`}
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <FileText className="w-4 h-4" />
+          Submissions
+          {stats.pending > 0 && (
+            <span className="ml-1 bg-warning-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {stats.pending}
+            </span>
+          )}
+        </span>
+      </button>
+
+      <button
+        onClick={() => { setView('signup_forms'); setActiveSubmission(null); refreshSfCounts(); }}
+        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+          view === 'signup_forms'
+            ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+        }`}
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <UserCheck className="w-4 h-4" />
+          Signup Forms
+        </span>
+      </button>
+    </div>
+  );
+
+  /** SIGNUP FORMS VIEW */
+  const DEFAULT_SIGNUP_FORM_TYPES = [
+    { type: 'volunteer', label: 'Volunteer Signup', icon: UserCheck, desc: 'Fields volunteers fill out when creating their account after approval.' },
+    { type: 'employee',  label: 'Staff Signup',     icon: Crown,     desc: 'Fields staff members fill out when creating their account after approval.' },
+  ];
+
+  const refreshSfCounts = (groupList?: GroupItem[]) => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}');
+      const counts: Record<string, { active: number; total: number }> = {};
+      const allTypes = [
+        ...DEFAULT_SIGNUP_FORM_TYPES.map((f) => ({ type: f.type })),
+        ...(groupList ?? groups).map((g) => ({ type: `group_${g.id}` })),
+      ];
+      for (const { type } of allTypes) {
+        const cfg = stored[type] ?? signupFormConfigs[type];
+        const fields: { enabled: boolean }[] = cfg?.fields ?? [];
+        counts[type] = { active: fields.filter((f) => f.enabled).length, total: fields.length };
+      }
+      setSfFieldCounts(counts);
+    } catch { /* ignore */ }
+  };
+
+  const sfRows = [
+    ...DEFAULT_SIGNUP_FORM_TYPES.map(({ type, label, icon, desc }) => ({ type, label, icon, desc })),
+    ...groups.map((g) => ({ type: `group_${g.id}`, label: `${g.name} Signup`, icon: Users, desc: `Signup form for members of the ${g.name} group.` })),
+  ];
+
+  const renderSignupForms = () => (
+    <div className="space-y-6">
+      <SectionHeader
+        title="Signup Forms"
+        subtitle="Configure the profile forms that approved applicants fill out when creating their account"
+      />
+
+      {renderTabs()}
+
+      <div className="space-y-3">
+        {sfRows.map(({ type, label, desc, icon: Icon }) => {
+          const counts = sfFieldCounts[type] ?? { active: 0, total: 0 };
+          return (
+            <div
+              key={type}
+              className="flex items-center justify-between p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-primary-50 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{label}</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {counts.active > 0 ? `${counts.active} of ${counts.total} fields active · ` : ''}{desc}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSfEditing({ type, label })}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex-shrink-0"
+              >
+                <Edit className="w-3.5 h-3.5" />
+                Customize
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {sfEditing && (
+        <SignupFormBuilder
+          type={sfEditing.type}
+          label={sfEditing.label}
+          onClose={() => { setSfEditing(null); refreshSfCounts(); }}
+        />
+      )}
     </div>
   );
 
@@ -1502,6 +1601,7 @@ export default function Applications() {
         {view === 'builder' && renderBuilder()}
         {view === 'submissions' && renderSubmissions()}
         {view === 'submission_detail' && renderSubmissionDetail()}
+        {view === 'signup_forms' && renderSignupForms()}
       </div>
 
       {/* ── Share Link / QR Code Modal ────────────────────────────────────── */}

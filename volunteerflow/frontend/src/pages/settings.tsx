@@ -33,15 +33,11 @@ import {
   Plus,
   Trash2,
   Edit,
-  Crown,
-  UserCheck,
   Copy,
   ExternalLink,
   Paintbrush,
-  ClipboardList,
 } from 'lucide-react';
-import { SignupFormBuilder } from '@/components/people/SignupFormBuilder';
-import { signupFormConfigs } from '@/lib/signupForms';
+
 import { PlanGate } from '@/components/PlanGate';
 import PaymentGatewayModal from '@/components/PaymentGatewayModal';
 
@@ -57,8 +53,7 @@ type SettingsTab =
   | 'branding'
   | 'security'
   | 'billing'
-  | 'data'
-  | 'signup-forms';
+  | 'data';
 
 interface TeamMember {
   id: string;
@@ -2894,103 +2889,12 @@ function MessagingTab() {
   );
 }
 
-// ─── SignupFormTab ──────────────────────────────────────────────────────────────
-
-const DEFAULT_FORM_TYPES = [
-  { type: 'volunteer', label: 'Volunteer Signup', icon: UserCheck, desc: 'Fields volunteers fill out when creating their account after approval.' },
-  { type: 'employee',  label: 'Staff Signup',     icon: Crown,     desc: 'Fields staff members fill out when creating their account after approval.' },
-];
-
-interface GroupItem { id: string; name: string; }
-
-function SignupFormTab() {
-  const [editing, setEditing] = useState<{ type: string; label: string } | null>(null);
-  const [fieldCounts, setFieldCounts] = useState<Record<string, { active: number; total: number }>>({});
-  const [groups, setGroups] = useState<GroupItem[]>([]);
-
-  const refreshCounts = (groupList?: GroupItem[]) => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}');
-      const counts: Record<string, { active: number; total: number }> = {};
-      const allTypes = [
-        ...DEFAULT_FORM_TYPES.map((f) => ({ type: f.type, label: f.label })),
-        ...(groupList ?? groups).map((g) => ({ type: `group_${g.id}`, label: g.name })),
-      ];
-      for (const { type } of allTypes) {
-        const cfg = stored[type] ?? signupFormConfigs[type];
-        const fields: { enabled: boolean }[] = cfg?.fields ?? [];
-        counts[type] = { active: fields.filter((f) => f.enabled).length, total: fields.length };
-      }
-      setFieldCounts(counts);
-    } catch { /* ignore */ }
-  };
-
-  useEffect(() => {
-    api.get<GroupItem[]>('/people/groups')
-      .then((data) => { setGroups(data); refreshCounts(data); })
-      .catch(() => refreshCounts([]));
-  }, []);
-
-  const rows = [
-    ...DEFAULT_FORM_TYPES.map(({ type, label, icon, desc }) => ({ type, label, icon, desc })),
-    ...groups.map((g) => ({ type: `group_${g.id}`, label: `${g.name} Signup`, icon: Users, desc: `Signup form for members of the ${g.name} group.` })),
-  ];
-
-  return (
-    <div className="space-y-5">
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Configure the profile form that approved applicants fill out when creating their account. Toggle fields on or off, mark them required, add custom questions, and reorder them.
-      </p>
-
-      <div className="space-y-3">
-        {rows.map(({ type, label, desc, icon: Icon }) => {
-          const counts = fieldCounts[type] ?? { active: 0, total: 0 };
-          return (
-            <div
-              key={type}
-              className="flex items-center justify-between p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-primary-50 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-4 h-4 text-primary-600 dark:text-primary-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{label}</p>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {counts.active > 0 ? `${counts.active} of ${counts.total} fields active · ` : ''}{desc}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setEditing({ type, label })}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex-shrink-0"
-              >
-                <Edit className="w-3.5 h-3.5" />
-                Customize
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      {editing && (
-        <SignupFormBuilder
-          type={editing.type}
-          label={editing.label}
-          onClose={() => { setEditing(null); refreshCounts(); }}
-        />
-      )}
-    </div>
-  );
-}
-
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Building2 }[] = [
   { id: 'organization', label: 'Organization',  icon: Building2     },
   { id: 'team',         label: 'Team',           icon: Users         },
   { id: 'roles',        label: 'Roles & Perms',  icon: Shield        },
-  { id: 'signup-forms', label: 'Signup Forms',   icon: ClipboardList },
   { id: 'notifications',label: 'Notifications',  icon: Bell          },
   { id: 'messaging',    label: 'Messaging',      icon: Mail          },
   { id: 'appearance',   label: 'Appearance',     icon: Palette       },
@@ -3008,8 +2912,7 @@ export default function Settings() {
       case 'organization':  return <OrganizationTab />;
       case 'team':          return <TeamTab />;
       case 'roles':         return <RolesTab />;
-      case 'signup-forms':  return <SignupFormTab />;
-      case 'notifications': return <NotificationsTab />;
+case 'notifications': return <NotificationsTab />;
       case 'messaging':     return <MessagingTab />;
       case 'appearance':    return <AppearanceTab />;
       case 'branding':      return <BrandingTab />;
