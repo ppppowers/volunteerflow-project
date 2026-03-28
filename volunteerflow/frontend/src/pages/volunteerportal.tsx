@@ -63,6 +63,7 @@ interface TrainingSection {
   videoUrl?: string;
   videoCaption?: string;
   filePrompt?: string;
+  fileTypes?: string;
   required: boolean;
 }
 
