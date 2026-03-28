@@ -20,8 +20,9 @@ export default function StaffLogin() {
       });
       const res = await raw.json();
       if (!raw.ok) throw new Error(res?.error ?? 'Login failed');
-      sessionStorage.setItem('vf_staff_token', res.token);
-      sessionStorage.setItem('vf_staff_user', JSON.stringify(res.user));
+      const { token, user } = res.data ?? res;
+      sessionStorage.setItem('vf_staff_token', token);
+      sessionStorage.setItem('vf_staff_user', JSON.stringify(user));
       router.replace('/staff');
     } catch (err: any) {
       setError(err.message ?? 'Login failed');
