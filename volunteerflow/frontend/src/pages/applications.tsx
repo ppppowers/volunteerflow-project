@@ -879,82 +879,62 @@ export default function Applications() {
   );
 
   /** SIGNUP FORMS VIEW */
-  const DEFAULT_SIGNUP_FORM_TYPES = [
-    { type: 'volunteer', label: 'Volunteer Signup', icon: UserCheck, desc: 'Fields volunteers fill out when creating their account after approval.' },
-    { type: 'employee',  label: 'Staff Signup',     icon: Crown,     desc: 'Fields staff members fill out when creating their account after approval.' },
-  ];
-
-  const refreshSfCounts = (groupList?: GroupItem[]) => {
+  const refreshSfCounts = () => {
     try {
       const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}');
-      const counts: Record<string, { active: number; total: number }> = {};
-      const allTypes = [
-        ...DEFAULT_SIGNUP_FORM_TYPES.map((f) => ({ type: f.type })),
-        ...(groupList ?? groups).map((g) => ({ type: `group_${g.id}` })),
-      ];
-      for (const { type } of allTypes) {
-        const cfg = stored[type] ?? signupFormConfigs[type];
-        const fields: { enabled: boolean }[] = cfg?.fields ?? [];
-        counts[type] = { active: fields.filter((f) => f.enabled).length, total: fields.length };
-      }
-      setSfFieldCounts(counts);
+      const cfg = stored['master'] ?? signupFormConfigs['master'];
+      const fields: { enabled: boolean }[] = cfg?.fields ?? [];
+      setSfFieldCounts({ master: { active: fields.filter((f) => f.enabled).length, total: fields.length } });
     } catch { /* ignore */ }
   };
 
-  const sfRows = [
-    ...DEFAULT_SIGNUP_FORM_TYPES.map(({ type, label, icon, desc }) => ({ type, label, icon, desc })),
-    ...groups.map((g) => ({ type: `group_${g.id}`, label: `${g.name} Signup`, icon: Users, desc: `Signup form for members of the ${g.name} group.` })),
-  ];
-
-  const renderSignupForms = () => (
-    <div className="space-y-6">
-      <SectionHeader
-        title="Signup Forms"
-        subtitle="Configure the profile forms that approved applicants fill out when creating their account"
-      />
-
-      {renderTabs()}
-
-      <div className="space-y-3">
-        {sfRows.map(({ type, label, desc, icon: Icon }) => {
-          const counts = sfFieldCounts[type] ?? { active: 0, total: 0 };
-          return (
-            <div
-              key={type}
-              className="flex items-center justify-between p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-primary-50 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-4 h-4 text-primary-600 dark:text-primary-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{label}</p>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {counts.active > 0 ? `${counts.active} of ${counts.total} fields active · ` : ''}{desc}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSfEditing({ type, label })}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex-shrink-0"
-              >
-                <Edit className="w-3.5 h-3.5" />
-                Customize
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      {sfEditing && (
-        <SignupFormBuilder
-          type={sfEditing.type}
-          label={sfEditing.label}
-          onClose={() => { setSfEditing(null); refreshSfCounts(); }}
+  const renderSignupForms = () => {
+    const counts = sfFieldCounts['master'] ?? { active: 0, total: 0 };
+    return (
+      <div className="space-y-6">
+        <SectionHeader
+          title="Signup Forms"
+          subtitle="The master signup form used for all applications"
         />
-      )}
-    </div>
-  );
+
+        {renderTabs()}
+
+        <div
+          className="flex items-center justify-between p-5 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
+              <UserCheck className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Master Signup Form</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                {counts.active > 0
+                  ? `${counts.active} of ${counts.total} fields active · `
+                  : ''}
+                Used for all volunteer applications
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => { refreshSfCounts(); setSfEditing({ type: 'master', label: 'Master Signup Form' }); }}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex-shrink-0"
+          >
+            <Edit className="w-4 h-4" />
+            Customize Form
+          </button>
+        </div>
+
+        {sfEditing && (
+          <SignupFormBuilder
+            type={sfEditing.type}
+            label={sfEditing.label}
+            onClose={() => { setSfEditing(null); refreshSfCounts(); }}
+          />
+        )}
+      </div>
+    );
+  };
 
   /** TEMPLATES LIST VIEW */
   const renderTemplates = () => (

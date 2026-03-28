@@ -109,43 +109,33 @@ export const DEFAULT_GROUP_FIELDS: FormField[] = [
   { id: 'terms',   type: 'checkbox', label: 'I agree to the terms and conditions', placeholder: undefined, required: true, enabled: true },
 ];
 
-// Returns the stored or default config for any form key (built-in or group_<id>)
+// Returns the stored or default config. All forms fall back to the master config.
 export function getFormConfig(key: string, fallbackTitle?: string): SignupFormConfig {
-  if (signupFormConfigs[key]) return signupFormConfigs[key];
   try {
     const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}') as Record<string, SignupFormConfig>;
     if (stored[key]) return stored[key];
+    // All form types fall back to master config
+    if (stored['master']) return { ...stored['master'], type: key, title: fallbackTitle ?? stored['master'].title };
   } catch { /* ignore */ }
-  return {
-    type: key,
-    title: fallbackTitle ?? 'Group Signup',
-    description: 'Fill out this form to sign up for this group.',
-    submitLabel: 'Submit',
-    fields: DEFAULT_GROUP_FIELDS.map((f) => ({ ...f })),
-  };
+  if (key === 'master' || !signupFormConfigs['master']) {
+    return signupFormConfigs['master'] ?? {
+      type: key,
+      title: fallbackTitle ?? 'Volunteer Application',
+      description: 'Join our team of dedicated volunteers and make a difference in your community.',
+      submitLabel: 'Submit Application',
+      fields: VOLUNTEER_FIELDS.map((f) => ({ ...f })),
+    };
+  }
+  return { ...signupFormConfigs['master'], type: key, title: fallbackTitle ?? signupFormConfigs['master'].title };
 }
 
 // Mutable module-level configs — admin builder writes here, /signup page reads here
 export const signupFormConfigs: Record<string, SignupFormConfig> = {
-  volunteer: {
-    type: 'volunteer',
+  master: {
+    type: 'master',
     title: 'Volunteer Application',
     description: 'Join our team of dedicated volunteers and make a difference in your community.',
     submitLabel: 'Submit Application',
     fields: VOLUNTEER_FIELDS,
-  },
-  member: {
-    type: 'member',
-    title: 'Membership Application',
-    description: 'Become a member and enjoy exclusive benefits and access to our community.',
-    submitLabel: 'Apply for Membership',
-    fields: MEMBER_FIELDS,
-  },
-  employee: {
-    type: 'employee',
-    title: 'Employment Application',
-    description: 'Apply to join our team and help us create meaningful impact.',
-    submitLabel: 'Submit Application',
-    fields: EMPLOYEE_FIELDS,
   },
 };
