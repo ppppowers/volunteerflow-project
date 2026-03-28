@@ -1055,7 +1055,7 @@ function CourseViewer({
     setCompleting(true);
     try {
       await portalApi.post('/portal/training/progress', { courseId: course.id, sectionId });
-      setCompletedSections(prev => new Set([...prev, sectionId]));
+      setCompletedSections(prev => new Set(Array.from(prev).concat(sectionId)));
     } catch {
       showToast('❌ Could not save progress');
     } finally {
