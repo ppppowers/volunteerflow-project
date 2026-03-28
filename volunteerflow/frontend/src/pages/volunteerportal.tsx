@@ -1614,29 +1614,36 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
 
   const handleSignup = useCallback(async (eventId: string, shiftId?: string) => {
     await portalApi.post('/portal/signup', { eventId, shiftId });
-    const ev = events.find(e => e.id === eventId);
-    if (ev) {
-      const newSignup: PortalSignup = {
-        id: crypto.randomUUID(),
-        event_id: eventId,
-        shift_id: shiftId ?? null,
-        status: 'APPROVED',
-        title: ev.title,
-        start_date: ev.startDate,
-        end_date: ev.endDate,
-        location: ev.location,
-        category: ev.category,
-        description: ev.description,
-      };
-      setSignups(prev => [...prev, newSignup]);
-      setEvents(prev => prev.map(e => {
-        if (e.id !== eventId) return e;
-        if (shiftId) {
-          return { ...e, shifts: e.shifts.map(s => s.id === shiftId ? { ...s, signedUp: s.signedUp + 1 } : s) };
-        }
-        return { ...e, participantCount: e.participantCount + 1 };
-      }));
+    // Re-fetch signups from the server so My Events is always accurate
+    try {
+      const freshSignups = await portalApi.get<PortalSignup[]>('/portal/my-signups');
+      setSignups(freshSignups ?? []);
+    } catch {
+      // If the re-fetch fails, fall back to an optimistic local update
+      const ev = events.find(e => e.id === eventId);
+      if (ev) {
+        setSignups(prev => [...prev, {
+          id: crypto.randomUUID(),
+          event_id: eventId,
+          shift_id: shiftId ?? null,
+          status: 'APPROVED',
+          title: ev.title,
+          start_date: ev.startDate,
+          end_date: ev.endDate,
+          location: ev.location,
+          category: ev.category,
+          description: ev.description,
+        }]);
+      }
     }
+    // Update the event card's participant / shift count
+    setEvents(prev => prev.map(e => {
+      if (e.id !== eventId) return e;
+      if (shiftId) {
+        return { ...e, shifts: e.shifts.map(s => s.id === shiftId ? { ...s, signedUp: s.signedUp + 1 } : s) };
+      }
+      return { ...e, participantCount: e.participantCount + 1 };
+    }));
   }, [events]);
 
   const handleCancel = useCallback(async (eventId: string, shiftId?: string) => {
