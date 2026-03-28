@@ -124,6 +124,8 @@ interface VolunteerEvent {
   contactEmail?: string;
   contactPhone?: string;
   notes?: string;
+  needLead?: boolean;
+  leadRole?: string;
 }
 
 type PageView = 'list' | 'builder' | 'detail';
@@ -440,6 +442,8 @@ interface ApiEvent {
   contactEmail?: string;
   contactPhone?: string;
   notes?: string;
+  needLead?: boolean;
+  leadRole?: string;
   registrationDeadline?: string;
   shifts?: Shift[];
   eligibility?: EligibilitySettings;
@@ -489,6 +493,8 @@ function mapApiEvent(v: ApiEvent): VolunteerEvent {
     contactEmail: v.contactEmail,
     contactPhone: v.contactPhone,
     notes: v.notes,
+    needLead: v.needLead ?? false,
+    leadRole: v.leadRole,
   };
 }
 
@@ -515,6 +521,8 @@ function toApiEvent(ev: VolunteerEvent): Record<string, unknown> {
     registrationDeadline: ev.registrationDeadline ?? '',
     shifts: ev.shifts,
     eligibility: ev.eligibility,
+    needLead: ev.needLead ?? false,
+    leadRole: ev.leadRole ?? '',
   };
 }
 
@@ -597,6 +605,7 @@ export default function Events() {
     shifts: [],
     eligibility: { ...DEFAULT_ELIGIBILITY, allowedStatuses: ['approved'], customRequirements: [] },
     tags: [],
+    needLead: false,
     createdAt: new Date().toISOString().split('T')[0],
     updatedAt: new Date().toISOString().split('T')[0],
   });
@@ -1186,6 +1195,57 @@ export default function Events() {
               </Button>
             </div>
           </Field>
+
+          {/* Lead */}
+          <div className="border-t border-neutral-100 dark:border-neutral-700 pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Event Lead</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  {editingEvent.needLead
+                    ? 'Volunteers with the required role can claim this lead in the portal'
+                    : 'Toggle on if this event requires a designated lead'}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={editingEvent.needLead ?? false}
+                onClick={() => updateField('needLead', !(editingEvent.needLead ?? false))}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                  editingEvent.needLead ? 'bg-primary-500' : 'bg-neutral-200 dark:bg-neutral-600'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${editingEvent.needLead ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+
+            {editingEvent.needLead && (
+              <div className="space-y-3">
+                <Field label="Required Role to Lead">
+                  <input
+                    type="text"
+                    value={editingEvent.leadRole ?? ''}
+                    onChange={(e) => updateField('leadRole', e.target.value || undefined)}
+                    placeholder="e.g. Team Leader, Event Coordinator"
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-3">
+              <Field label="Lead Name">
+                <input type="text" value={editingEvent.contactName ?? ''} onChange={(e) => updateField('contactName', e.target.value || undefined)} placeholder="Jane Doe" className={inputClass} />
+              </Field>
+              <Field label="Lead Email">
+                <input type="email" value={editingEvent.contactEmail ?? ''} onChange={(e) => updateField('contactEmail', e.target.value || undefined)} placeholder="jane@example.com" className={inputClass} />
+              </Field>
+              <Field label="Lead Phone">
+                <input type="tel" value={editingEvent.contactPhone ?? ''} onChange={(e) => updateField('contactPhone', e.target.value || undefined)} placeholder="(555) 123-4567" className={inputClass} />
+              </Field>
+            </div>
+          </div>
         </BuilderSection>
 
         {/* ── Section 2: Images ─────────────────────────────────────────────── */}
@@ -1336,18 +1396,6 @@ export default function Events() {
             </Field>
           </div>
 
-          {/* Contact info */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <Field label="Lead Name">
-              <input type="text" value={editingEvent.contactName ?? ''} onChange={(e) => updateField('contactName', e.target.value || undefined)} placeholder="Jane Doe" className={inputClass} />
-            </Field>
-            <Field label="Lead Email">
-              <input type="email" value={editingEvent.contactEmail ?? ''} onChange={(e) => updateField('contactEmail', e.target.value || undefined)} placeholder="jane@example.com" className={inputClass} />
-            </Field>
-            <Field label="Lead Phone">
-              <input type="tel" value={editingEvent.contactPhone ?? ''} onChange={(e) => updateField('contactPhone', e.target.value || undefined)} placeholder="(555) 123-4567" className={inputClass} />
-            </Field>
-          </div>
         </BuilderSection>
 
         {/* ── Section 4: Shifts ──────────────────────────────────────────────── */}
@@ -1626,13 +1674,32 @@ export default function Events() {
             )}
           </div>
 
-          {/* Contact */}
-          {(activeEvent.contactName || activeEvent.contactEmail) && (
+          {/* Lead */}
+          {(activeEvent.needLead || activeEvent.contactName || activeEvent.contactEmail) && (
             <div className="mt-4 pt-4 border-t border-neutral-100 dark:border-neutral-700">
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Event Contact</p>
-              <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                {activeEvent.contactName}{activeEvent.contactEmail ? ` · ${activeEvent.contactEmail}` : ''}{activeEvent.contactPhone ? ` · ${activeEvent.contactPhone}` : ''}
-              </p>
+              <div className="flex items-center gap-2 mb-1.5">
+                <UserCheck className="w-3.5 h-3.5 text-primary-500" />
+                <p className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Event Lead</p>
+                {activeEvent.needLead && !activeEvent.contactName && (
+                  <span className="ml-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-400">
+                    Lead Needed
+                  </span>
+                )}
+              </div>
+              {activeEvent.needLead && !activeEvent.contactName ? (
+                <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                  Open to volunteers
+                  {activeEvent.leadRole ? (
+                    <> with role <span className="font-semibold text-primary-600 dark:text-primary-400">{activeEvent.leadRole}</span></>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                  {activeEvent.contactName}
+                  {activeEvent.contactEmail ? ` · ${activeEvent.contactEmail}` : ''}
+                  {activeEvent.contactPhone ? ` · ${activeEvent.contactPhone}` : ''}
+                </p>
+              )}
             </div>
           )}
         </Card>
