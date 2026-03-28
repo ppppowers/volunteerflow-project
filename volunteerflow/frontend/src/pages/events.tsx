@@ -1338,13 +1338,13 @@ export default function Events() {
 
           {/* Contact info */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <Field label="Contact Name">
+            <Field label="Lead Name">
               <input type="text" value={editingEvent.contactName ?? ''} onChange={(e) => updateField('contactName', e.target.value || undefined)} placeholder="Jane Doe" className={inputClass} />
             </Field>
-            <Field label="Contact Email">
+            <Field label="Lead Email">
               <input type="email" value={editingEvent.contactEmail ?? ''} onChange={(e) => updateField('contactEmail', e.target.value || undefined)} placeholder="jane@example.com" className={inputClass} />
             </Field>
-            <Field label="Contact Phone">
+            <Field label="Lead Phone">
               <input type="tel" value={editingEvent.contactPhone ?? ''} onChange={(e) => updateField('contactPhone', e.target.value || undefined)} placeholder="(555) 123-4567" className={inputClass} />
             </Field>
           </div>
