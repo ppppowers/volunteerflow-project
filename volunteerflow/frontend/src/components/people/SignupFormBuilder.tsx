@@ -35,6 +35,7 @@ const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   checkbox: 'Checkbox',
   date: 'Date',
   image: 'Profile Photo',
+  password: 'Password',
 };
 
 let _nextId = 1000;
