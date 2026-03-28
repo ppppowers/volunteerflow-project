@@ -3256,6 +3256,16 @@ app.post('/api/portal/setup-password', writeLimiter, async (req, res) => {
   }
 });
 
+// Public — returns the platform-wide theme catalog from system_settings
+app.get('/api/portal/themes', async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT value FROM system_settings WHERE key = 'themes'");
+    res.json(rows.length ? rows[0].value : []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/portal/settings/:type', async (req, res) => {
   const { type } = req.params;
   if (!PORTAL_TYPES.has(type)) return res.status(400).json({ error: 'Invalid portal type' });

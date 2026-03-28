@@ -50,7 +50,6 @@ type SettingsTab =
   | 'notifications'
   | 'messaging'
   | 'appearance'
-  | 'branding'
   | 'security'
   | 'billing'
   | 'data';
@@ -795,12 +794,13 @@ function applyDensity(density: string) {
 
 function AppearanceTab() {
   const { theme, setTheme } = useTheme();
-  const [saved, setSaved] = useState(false);
-  const [accentColor, setAccentColor] = useState('blue');
-  const [density, setDensity] = useState('comfortable');
-  const [dateFormat, setDateFormat] = useState('MMM D, YYYY');
 
-  // Load and apply persisted appearance settings on mount
+  // ── Admin UI appearance (localStorage) ──────────────────────────────────────
+  const [saved, setSaved]             = useState(false);
+  const [accentColor, setAccentColor] = useState('blue');
+  const [density, setDensity]         = useState('comfortable');
+  const [dateFormat, setDateFormat]   = useState('MMM D, YYYY');
+
   useEffect(() => {
     try {
       const stored = localStorage.getItem('vf_appearance');
@@ -810,19 +810,61 @@ function AppearanceTab() {
           setAccentColor(p.accentColor);
           applyAccentColor(p.accentColor);
         }
-        if (p.density) {
-          setDensity(p.density);
-          applyDensity(p.density);
-        }
+        if (p.density) { setDensity(p.density); applyDensity(p.density); }
         if (p.dateFormat) setDateFormat(p.dateFormat);
       }
     } catch { /* ignore corrupt data */ }
   }, []);
 
+  // ── Portal content (API) ─────────────────────────────────────────────────────
+  const [brandingLoading, setBrandingLoading] = useState(true);
+  const [brandingSaving, setBrandingSaving]   = useState(false);
+  const [brandingError, setBrandingError]     = useState('');
+  const [logoPreview, setLogoPreview]         = useState('');
+  const [brandingForm, setBrandingForm] = useState({
+    portalName: '', subdomain: '',
+    primaryColor: '#10b981', accentColor: '#0d9488', // hidden — preserved on save, edited in Portal Designer
+    welcomeHeading: '', welcomeSubtext: '', footerText: '', showPoweredBy: true,
+  });
+
+  useEffect(() => {
+    api.get<{
+      portalName: string; subdomain: string; primaryColor: string; accentColor: string;
+      welcomeHeading: string; welcomeSubtext: string; footerText: string;
+      showPoweredBy: boolean; logoBase64: string;
+    }>('/branding').then((d) => {
+      setBrandingForm({
+        portalName: d.portalName ?? '', subdomain: d.subdomain ?? '',
+        primaryColor: d.primaryColor ?? '#10b981', accentColor: d.accentColor ?? '#0d9488',
+        welcomeHeading: d.welcomeHeading ?? '', welcomeSubtext: d.welcomeSubtext ?? '',
+        footerText: d.footerText ?? '', showPoweredBy: d.showPoweredBy ?? true,
+      });
+      if (d.logoBase64) setLogoPreview(d.logoBase64);
+    }).catch(() => {}).finally(() => setBrandingLoading(false));
+  }, []);
+
+  const setBranding = (k: string) => (v: string | boolean) =>
+    setBrandingForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    localStorage.setItem('vf_appearance', JSON.stringify({ accentColor, density, dateFormat }));
+    setBrandingSaving(true);
+    setBrandingError('');
+    try {
+      await api.put('/branding', { ...brandingForm, logoBase64: logoPreview });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: unknown) {
+      setBrandingError(err instanceof Error ? err.message : 'Failed to save branding settings');
+    } finally {
+      setBrandingSaving(false);
+    }
+  };
+
   const themeOptions = [
-    { value: 'light' as const, icon: Sun, label: 'Light', desc: 'Clean white interface' },
-    { value: 'dark' as const, icon: Moon, label: 'Dark', desc: 'Easy on the eyes' },
-    { value: 'system' as const, icon: Monitor, label: 'System', desc: 'Follows OS setting' },
+    { value: 'light'  as const, icon: Sun,     label: 'Light',  desc: 'Clean white interface' },
+    { value: 'dark'   as const, icon: Moon,    label: 'Dark',   desc: 'Easy on the eyes'      },
+    { value: 'system' as const, icon: Monitor, label: 'System', desc: 'Follows OS setting'    },
   ];
 
   const solidColors = [
@@ -835,46 +877,18 @@ function AppearanceTab() {
   ];
 
   const signatureThemes = [
-    {
-      value: 'sunset',
-      label: 'Sunset',
-      desc: 'Golden orange to deep crimson',
-      gradient: 'linear-gradient(135deg, #ff8937 0%, #da3a23 55%, #700e36 100%)',
-    },
-    {
-      value: 'ocean',
-      label: 'Ocean',
-      desc: 'Sky blue to deep navy',
-      gradient: 'linear-gradient(135deg, #6cc4f0 0%, #0888cc 55%, #053250 100%)',
-    },
-    {
-      value: 'aurora',
-      label: 'Aurora',
-      desc: 'Teal haze to deep indigo',
-      gradient: 'linear-gradient(135deg, #a2f4e8 0%, #6366f1 55%, #312694 100%)',
-    },
-    {
-      value: 'ember',
-      label: 'Ember',
-      desc: 'Warm gold to rich brown',
-      gradient: 'linear-gradient(135deg, #fccc52 0%, #d78508 55%, #562604 100%)',
-    },
-    {
-      value: 'rose',
-      label: 'Rose',
-      desc: 'Blush pink to deep berry',
-      gradient: 'linear-gradient(135deg, #fc91ac 0%, #e64472 55%, #74122c 100%)',
-    },
-    {
-      value: 'midnight',
-      label: 'Midnight',
-      desc: 'Dusty lavender to deep indigo',
-      gradient: 'linear-gradient(135deg, #aca8ec 0%, #6460c6 55%, #241c64 100%)',
-    },
+    { value: 'sunset',   label: 'Sunset',   desc: 'Golden orange to deep crimson', gradient: 'linear-gradient(135deg, #ff8937 0%, #da3a23 55%, #700e36 100%)' },
+    { value: 'ocean',    label: 'Ocean',    desc: 'Sky blue to deep navy',          gradient: 'linear-gradient(135deg, #6cc4f0 0%, #0888cc 55%, #053250 100%)' },
+    { value: 'aurora',   label: 'Aurora',   desc: 'Teal haze to deep indigo',       gradient: 'linear-gradient(135deg, #a2f4e8 0%, #6366f1 55%, #312694 100%)' },
+    { value: 'ember',    label: 'Ember',    desc: 'Warm gold to rich brown',        gradient: 'linear-gradient(135deg, #fccc52 0%, #d78508 55%, #562604 100%)' },
+    { value: 'rose',     label: 'Rose',     desc: 'Blush pink to deep berry',       gradient: 'linear-gradient(135deg, #fc91ac 0%, #e64472 55%, #74122c 100%)' },
+    { value: 'midnight', label: 'Midnight', desc: 'Dusty lavender to deep indigo',  gradient: 'linear-gradient(135deg, #aca8ec 0%, #6460c6 55%, #241c64 100%)' },
   ];
 
   return (
     <div className="space-y-6">
+
+      {/* ── Theme ─────────────────────────────────────────────────────────── */}
       <Card className="p-6">
         <SectionTitle title="Theme" subtitle="Choose how VolunteerFlow looks for you" />
         <div className="grid grid-cols-3 gap-3">
@@ -905,10 +919,16 @@ function AppearanceTab() {
         </div>
       </Card>
 
+      {/* ── Accent Color (admin dashboard only) ───────────────────────────── */}
       <Card className="p-6">
-        <SectionTitle title="Accent Color" subtitle="Personalize the primary color used across the interface" />
-
-        {/* Classic solid colors */}
+        <SectionTitle title="Accent Color" subtitle="Personalize the primary color used across the admin dashboard" />
+        <div className="flex items-center gap-1.5 mb-4 px-3 py-2 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg border border-neutral-200 dark:border-neutral-700">
+          <Paintbrush className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            These colors apply to this admin dashboard only. Volunteer portal colors are configured in{' '}
+            <strong className="text-neutral-600 dark:text-neutral-300">Portal Designer</strong>.
+          </p>
+        </div>
         <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-2">Classic</p>
         <div className="flex flex-wrap gap-3 mb-5">
           {solidColors.map((c) => (
@@ -924,8 +944,6 @@ function AppearanceTab() {
             />
           ))}
         </div>
-
-        {/* Signature gradient themes */}
         <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-2">Signature Themes</p>
         <div className="grid grid-cols-3 gap-2.5">
           {signatureThemes.map((t) => {
@@ -940,17 +958,11 @@ function AppearanceTab() {
                     : 'border-transparent hover:border-neutral-300 dark:hover:border-neutral-600 hover:shadow-sm'
                 }`}
               >
-                {/* Gradient swatch */}
-                <div
-                  className="h-10 w-full"
-                  style={{ background: t.gradient }}
-                />
-                {/* Label */}
+                <div className="h-10 w-full" style={{ background: t.gradient }} />
                 <div className="px-2.5 py-2 bg-white dark:bg-neutral-800">
                   <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-100 leading-tight">{t.label}</p>
                   <p className="text-[10px] text-neutral-400 dark:text-neutral-500 leading-tight mt-0.5">{t.desc}</p>
                 </div>
-                {/* Selected checkmark */}
                 {isActive && (
                   <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-white/90 dark:bg-neutral-900/90 rounded-full flex items-center justify-center shadow-sm">
                     <Check className="w-3 h-3 text-neutral-800 dark:text-neutral-100" />
@@ -960,10 +972,9 @@ function AppearanceTab() {
             );
           })}
         </div>
-
-        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-3">Changes apply instantly and are saved with your preferences.</p>
       </Card>
 
+      {/* ── Display Preferences ───────────────────────────────────────────── */}
       <Card className="p-6">
         <SectionTitle title="Display Preferences" />
         <div className="space-y-4">
@@ -995,11 +1006,81 @@ function AppearanceTab() {
         </div>
       </Card>
 
-      <SaveBanner saved={saved} onSave={() => {
-        localStorage.setItem('vf_appearance', JSON.stringify({ accentColor, density, dateFormat }));
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
-      }} />
+      {/* ── Portal Branding (plan-gated) ───────────────────────────────────── */}
+      <PlanGate feature="custom_branding">
+        {brandingLoading ? (
+          <div className="animate-pulse space-y-4">
+            {[1, 2].map(i => <div key={i} className="h-40 bg-neutral-100 dark:bg-neutral-800 rounded-xl" />)}
+          </div>
+        ) : (
+          <>
+            {brandingError && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-400 text-sm">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                {brandingError}
+              </div>
+            )}
+
+            {/* Volunteer Portal Link */}
+            <Card className="p-6">
+              <SectionTitle title="Volunteer Portal Link" subtitle="Share this link with volunteers to access their portal" />
+              <div className="flex items-center gap-3">
+                <div className="flex-1 flex items-center gap-2 px-3 py-2.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg">
+                  <ExternalLink className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+                  <a
+                    href="/volunteerportal"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary-600 dark:text-primary-400 font-mono truncate hover:underline"
+                  >
+                    {typeof window !== 'undefined' ? `${window.location.origin}/volunteerportal` : '/volunteerportal'}
+                  </a>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/volunteerportal`)}>
+                  <Copy className="w-4 h-4 mr-1.5" />
+                  Copy
+                </Button>
+              </div>
+            </Card>
+
+            {/* Portal Content */}
+            <Card className="p-6">
+              <SectionTitle title="Portal Content" subtitle="Text and labels shown on the volunteer-facing portal" />
+              <div className="space-y-4">
+                <Field label="Welcome heading">
+                  <input type="text" value={brandingForm.welcomeHeading} placeholder="Make a Difference Today" onChange={(e) => setBranding('welcomeHeading')(e.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Welcome subtext">
+                  <textarea
+                    value={brandingForm.welcomeSubtext}
+                    placeholder="Join our community of passionate volunteers and help create lasting change."
+                    onChange={(e) => setBranding('welcomeSubtext')(e.target.value)}
+                    rows={2}
+                    className={`${inputClass} resize-none`}
+                  />
+                </Field>
+                <Field label="Portal footer text">
+                  <input type="text" value={brandingForm.footerText} placeholder={`© ${new Date().getFullYear()} Your Organization · All rights reserved`} onChange={(e) => setBranding('footerText')(e.target.value)} className={inputClass} />
+                </Field>
+                <div className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Show "Powered by VolunteerFlow"</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Displays a small badge in the footer of the volunteer portal</p>
+                  </div>
+                  <button
+                    onClick={() => setBranding('showPoweredBy')(!brandingForm.showPoweredBy)}
+                    className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${brandingForm.showPoweredBy ? 'bg-primary-600 dark:bg-primary-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${brandingForm.showPoweredBy ? 'translate-x-5' : ''}`} />
+                  </button>
+                </div>
+              </div>
+            </Card>
+          </>
+        )}
+      </PlanGate>
+
+      <SaveBanner saved={saved} saving={brandingSaving} onSave={handleSave} />
     </div>
   );
 }
@@ -1726,249 +1807,6 @@ function RolesTab() {
 
 // ─── Tab: Branding ────────────────────────────────────────────────────────────
 
-function BrandingTab() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState('');
-  const [logoPreview, setLogoPreview] = useState('');
-  const [form, setForm] = useState({
-    portalName: '',
-    subdomain: '',
-    primaryColor: '#10b981',
-    accentColor: '#0d9488',
-    welcomeHeading: '',
-    welcomeSubtext: '',
-    footerText: '',
-    showPoweredBy: true,
-  });
-
-  useEffect(() => {
-    api.get<{
-      portalName: string; subdomain: string; primaryColor: string; accentColor: string;
-      welcomeHeading: string; welcomeSubtext: string; footerText: string;
-      showPoweredBy: boolean; logoBase64: string;
-    }>('/branding').then((d) => {
-      setForm({
-        portalName: d.portalName, subdomain: d.subdomain, primaryColor: d.primaryColor,
-        accentColor: d.accentColor, welcomeHeading: d.welcomeHeading,
-        welcomeSubtext: d.welcomeSubtext, footerText: d.footerText, showPoweredBy: d.showPoweredBy,
-      });
-      if (d.logoBase64) setLogoPreview(d.logoBase64);
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, []);
-
-  const set = (k: string) => (v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveError('');
-    try {
-      await api.put('/branding', { ...form, logoBase64: logoPreview });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save branding settings');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const PRESET_COLORS = [
-    // Classic solid
-    { name: 'Emerald',    primary: '#10b981', accent: '#0d9488', gradient: 'linear-gradient(135deg, #34d399 0%, #10b981 50%, #047857 100%)' },
-    { name: 'Sky Blue',   primary: '#3b82f6', accent: '#1d4ed8', gradient: 'linear-gradient(135deg, #93c5fd 0%, #3b82f6 50%, #1d4ed8 100%)' },
-    { name: 'Violet',     primary: '#8b5cf6', accent: '#6d28d9', gradient: 'linear-gradient(135deg, #c4b5fd 0%, #8b5cf6 50%, #6d28d9 100%)' },
-    { name: 'Crimson',    primary: '#ef4444', accent: '#b91c1c', gradient: 'linear-gradient(135deg, #fca5a5 0%, #ef4444 50%, #991b1b 100%)' },
-    { name: 'Slate',      primary: '#475569', accent: '#1e293b', gradient: 'linear-gradient(135deg, #94a3b8 0%, #475569 50%, #1e293b 100%)' },
-    // Signature gradient themes
-    { name: 'Sunset',     primary: '#f55a23', accent: '#9b1b3a', gradient: 'linear-gradient(135deg, #fb923c 0%, #f55a23 50%, #9b1b3a 100%)' },
-    { name: 'Deep Ocean', primary: '#0e86d4', accent: '#001e3c', gradient: 'linear-gradient(135deg, #38bdf8 0%, #0e86d4 55%, #001e3c 100%)' },
-    { name: 'Aurora',     primary: '#6366f1', accent: '#312694', gradient: 'linear-gradient(135deg, #a2f4e8 0%, #6366f1 60%, #312694 100%)' },
-    { name: 'Ember',      primary: '#d97706', accent: '#7c2d12', gradient: 'linear-gradient(135deg, #fcd34d 0%, #d97706 55%, #7c2d12 100%)' },
-    { name: 'Rose Petal', primary: '#f43f5e', accent: '#881337', gradient: 'linear-gradient(135deg, #fda4af 0%, #f43f5e 55%, #881337 100%)' },
-    { name: 'Midnight',   primary: '#5b5bd6', accent: '#1e1b4b', gradient: 'linear-gradient(135deg, #a5b4fc 0%, #5b5bd6 55%, #1e1b4b 100%)' },
-    { name: 'Forest',     primary: '#16a34a', accent: '#052e16', gradient: 'linear-gradient(135deg, #86efac 0%, #16a34a 55%, #052e16 100%)' },
-  ];
-
-  return (
-    <PlanGate feature="custom_branding">
-    {loading ? (
-      <div className="animate-pulse space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 bg-neutral-100 dark:bg-neutral-800 rounded-xl" />)}</div>
-    ) : (
-    <div className="space-y-6">
-      {saveError && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-400 text-sm">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          {saveError}
-        </div>
-      )}
-      {/* Portal Link */}
-      <Card className="p-6">
-        <SectionTitle title="Volunteer Portal Link" subtitle="Share this link with volunteers to access their portal" />
-        <div className="flex items-center gap-3">
-          <div className="flex-1 flex items-center gap-2 px-3 py-2.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg">
-            <ExternalLink className="w-4 h-4 text-neutral-400 flex-shrink-0" />
-            <a
-              href="/volunteerportal"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary-600 dark:text-primary-400 font-mono truncate hover:underline"
-            >
-              {typeof window !== 'undefined' ? `${window.location.origin}/volunteerportal` : '/volunteerportal'}
-            </a>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/volunteerportal`)}>
-            <Copy className="w-4 h-4 mr-1.5" />
-            Copy
-          </Button>
-        </div>
-      </Card>
-
-      {/* Colors */}
-      <Card className="p-6">
-        <SectionTitle title="Brand Colors" subtitle="Applied to buttons, links, and highlights in the volunteer portal" />
-        <div className="mb-5">
-          <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-2.5">Theme Presets</p>
-          <div className="grid grid-cols-4 gap-2">
-            {PRESET_COLORS.map((p) => {
-              const isActive = form.primaryColor === p.primary;
-              return (
-                <button
-                  key={p.name}
-                  onClick={() => { set('primaryColor')(p.primary); set('accentColor')(p.accent); }}
-                  className={`relative overflow-hidden rounded-xl border-2 transition-all text-left ${
-                    isActive
-                      ? 'border-neutral-800 dark:border-neutral-100 shadow-md scale-[1.04]'
-                      : 'border-transparent hover:border-neutral-300 dark:hover:border-neutral-600 hover:shadow-sm'
-                  }`}
-                >
-                  <div className="h-8 w-full" style={{ background: p.gradient }} />
-                  <div className="px-2 py-1.5 bg-white dark:bg-neutral-800">
-                    <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-100 leading-tight truncate">{p.name}</p>
-                  </div>
-                  {isActive && (
-                    <div className="absolute top-1 right-1 w-4 h-4 bg-white/90 dark:bg-neutral-900/90 rounded-full flex items-center justify-center shadow-sm">
-                      <Check className="w-2.5 h-2.5 text-neutral-800 dark:text-neutral-100" />
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Primary color">
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={/^#[0-9a-fA-F]{6}$/.test(form.primaryColor) ? form.primaryColor : '#10b981'}
-                onChange={(e) => set('primaryColor')(e.target.value)}
-                className="w-10 h-10 rounded-lg border border-neutral-300 dark:border-neutral-600 cursor-pointer p-0.5 bg-white dark:bg-neutral-700"
-              />
-              <input
-                type="text"
-                value={form.primaryColor}
-                placeholder="#10b981"
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (/^#?[0-9a-fA-F]{0,6}$/.test(v)) set('primaryColor')(v.startsWith('#') ? v : `#${v}`);
-                }}
-                className={inputClass}
-              />
-            </div>
-          </Field>
-          <Field label="Accent color">
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={/^#[0-9a-fA-F]{6}$/.test(form.accentColor) ? form.accentColor : '#0d9488'}
-                onChange={(e) => set('accentColor')(e.target.value)}
-                className="w-10 h-10 rounded-lg border border-neutral-300 dark:border-neutral-600 cursor-pointer p-0.5 bg-white dark:bg-neutral-700"
-              />
-              <input
-                type="text"
-                value={form.accentColor}
-                placeholder="#0d9488"
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (/^#?[0-9a-fA-F]{0,6}$/.test(v)) set('accentColor')(v.startsWith('#') ? v : `#${v}`);
-                }}
-                className={inputClass}
-              />
-            </div>
-          </Field>
-        </div>
-      </Card>
-
-      {/* Portal content */}
-      <Card className="p-6">
-        <SectionTitle title="Portal Content" subtitle="Text shown on the volunteer-facing portal" />
-        <div className="space-y-4">
-          <Field label="Welcome heading">
-            <input type="text" value={form.welcomeHeading} placeholder="Make a Difference Today" onChange={(e) => set('welcomeHeading')(e.target.value)} className={inputClass} />
-          </Field>
-          <Field label="Welcome subtext">
-            <textarea
-              value={form.welcomeSubtext}
-              placeholder="Join our community of passionate volunteers and help create lasting change."
-              onChange={(e) => set('welcomeSubtext')(e.target.value)}
-              rows={2}
-              className={`${inputClass} resize-none`}
-            />
-          </Field>
-          <Field label="Portal footer text">
-            <input type="text" value={form.footerText} placeholder={`© ${new Date().getFullYear()} Your Organization · All rights reserved`} onChange={(e) => set('footerText')(e.target.value)} className={inputClass} />
-          </Field>
-          <div className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg">
-            <div>
-              <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Show "Powered by VolunteerFlow"</p>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Displays a small badge in the footer of the volunteer portal</p>
-            </div>
-            <button
-              onClick={() => set('showPoweredBy')(!form.showPoweredBy)}
-              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${form.showPoweredBy ? 'bg-primary-600 dark:bg-primary-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.showPoweredBy ? 'translate-x-5' : ''}`} />
-            </button>
-          </div>
-        </div>
-      </Card>
-
-      {/* Preview */}
-      <Card className="p-6">
-        <SectionTitle title="Portal Preview" subtitle="A simplified preview of how your volunteer portal header looks" />
-        <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
-          <div className="p-6 text-white" style={{ background: `linear-gradient(135deg, ${/^#[0-9a-fA-F]{6}$/.test(form.primaryColor) ? form.primaryColor : '#10b981'}, ${/^#[0-9a-fA-F]{6}$/.test(form.accentColor) ? form.accentColor : '#0d9488'})` }}>
-            {logoPreview ? (
-              <img src={logoPreview} alt="Logo" className="h-10 object-contain mb-4" />
-            ) : (
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-                  <Paintbrush className="w-4 h-4 text-white" />
-                </div>
-                <span className="font-bold text-white">{form.portalName || 'Your Organization'}</span>
-              </div>
-            )}
-            <h2 className="text-xl font-bold text-white mb-1">{form.welcomeHeading || 'Make a Difference Today'}</h2>
-            <p className="text-sm text-white/75">{form.welcomeSubtext || 'Join our community of passionate volunteers and help create lasting change.'}</p>
-            <button className="mt-4 px-4 py-2 bg-white text-sm font-bold rounded-lg" style={{ color: /^#[0-9a-fA-F]{6}$/.test(form.primaryColor) ? form.primaryColor : '#10b981' }}>
-              Browse Events
-            </button>
-          </div>
-          <div className="px-6 py-3 bg-neutral-50 dark:bg-neutral-800 border-t border-neutral-100 dark:border-neutral-700 text-xs text-neutral-400 flex items-center justify-between">
-            <span>{form.footerText || `© ${new Date().getFullYear()} ${form.portalName || 'Your Organization'} · All rights reserved`}</span>
-            {form.showPoweredBy && <span className="text-[10px] opacity-60">Powered by VolunteerFlow</span>}
-          </div>
-        </div>
-      </Card>
-
-      <SaveBanner saved={saved} saving={saving} onSave={handleSave} />
-    </div>
-    )}
-    </PlanGate>
-  );
-}
 
 interface BillingData {
   plan: PlanId;
@@ -2923,8 +2761,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Building2 }[] = [
   { id: 'roles',        label: 'Roles & Perms',  icon: Shield        },
   { id: 'notifications',label: 'Notifications',  icon: Bell          },
   { id: 'messaging',    label: 'Messaging',      icon: Mail          },
-  { id: 'appearance',   label: 'Appearance',     icon: Palette       },
-  { id: 'branding',     label: 'Branding',       icon: Paintbrush    },
+  { id: 'appearance',   label: 'Appearance & Branding', icon: Palette   },
   { id: 'security',     label: 'Security',       icon: Shield        },
   { id: 'billing',      label: 'Billing',        icon: CreditCard    },
   { id: 'data',         label: 'Data & Privacy', icon: Database      },
@@ -2941,7 +2778,6 @@ export default function Settings() {
 case 'notifications': return <NotificationsTab />;
       case 'messaging':     return <MessagingTab />;
       case 'appearance':    return <AppearanceTab />;
-      case 'branding':      return <BrandingTab />;
       case 'security':      return <SecurityTab />;
       case 'billing':       return <BillingTab />;
       case 'data':          return <DataTab />;

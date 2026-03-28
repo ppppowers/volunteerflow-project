@@ -54,7 +54,7 @@ interface Theme {
   };
 }
 
-// ─── Theme Definitions ────────────────────────────────────────────────────────
+// ─── Theme Definitions (fallback — used when API hasn't loaded yet or fails) ──
 
 const THEMES: Theme[] = [
   {
@@ -592,6 +592,7 @@ export default function PortalDesignerPage() {
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [themes, setThemes] = useState<Theme[]>(THEMES);
 
   // Read org name from the stored user object (set at login)
   const orgName = (() => {
@@ -601,6 +602,20 @@ export default function PortalDesignerPage() {
       return u.orgName || u.name || 'My Organisation';
     } catch { return 'My Organisation'; }
   })();
+
+  // Load platform theme catalog from system_settings
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+    fetch(`${base}/portal/themes`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: unknown) => {
+        if (Array.isArray(data) && data.length > 0 && (data[0] as Theme).colors) {
+          setThemes(data as Theme[]);
+        }
+        // else keep THEMES fallback
+      })
+      .catch(() => { /* keep THEMES fallback */ });
+  }, []);
 
   // Load settings for a portal type the first time it's viewed
   const loadPortalType = useCallback(async (type: PortalType) => {
@@ -639,7 +654,7 @@ export default function PortalDesignerPage() {
   const setUseCustom = (v: boolean | ((p: boolean) => boolean)) =>
     updateSettings({ useCustom: typeof v === 'function' ? v(cur.useCustom) : v });
 
-  const selectedTheme = THEMES.find(t => t.id === selectedThemeId) ?? THEMES[0];
+  const selectedTheme = themes.find(t => t.id === selectedThemeId) ?? themes[0] ?? THEMES[0];
 
   const previewHtml = useCustom
     ? customHtml
@@ -786,8 +801,10 @@ export default function PortalDesignerPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Theme grid */}
             <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-4">
-              {THEMES.map(theme => {
+              {themes.map(theme => {
                 const isSelected = selectedThemeId === theme.id && !useCustom;
+                const plan = (theme as Theme & { plan?: string }).plan;
+                const planLocked = plan && plan !== 'all';
                 return (
                   <button
                     key={theme.id}
@@ -805,9 +822,15 @@ export default function PortalDesignerPage() {
                       </div>
                     )}
                     {/* Badge */}
-                    {theme.badge && (
+                    {theme.badge && !planLocked && (
                       <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-neutral-800 text-white text-[10px] font-semibold rounded z-10">
                         {theme.badge}
+                      </div>
+                    )}
+                    {/* Plan lock badge */}
+                    {planLocked && (
+                      <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-violet-600 text-white text-[10px] font-semibold rounded z-10 capitalize">
+                        {plan}+
                       </div>
                     )}
                     <ThemeMiniPreview theme={theme} />

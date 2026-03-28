@@ -59,10 +59,22 @@ const CATEGORY_LABEL: Record<FlagCategory, string> = {
 interface PortalTheme {
   id: string;
   name: string;
-  primaryColor: string;
-  accentColor: string;
+  description: string;
+  badge?: string;
   plan: 'all' | 'grow' | 'enterprise';
   builtIn?: boolean;
+  colors: {
+    bg: string;
+    header: string;
+    headerText: string;
+    accent: string;
+    accentText: string;
+    card: string;
+    text: string;
+    subtext: string;
+    border: string;
+    heroGradient?: string;
+  };
 }
 
 const PLAN_BADGE: Record<string, string> = {
@@ -94,8 +106,9 @@ export default function StaffDevConsolePage() {
   const [savingMaintMsg, setSavingMaintMsg]   = useState(false);
 
   // ── Theme management ────────────────────────────────────────────────────────
+  const EMPTY_THEME_FORM = { name: '', description: '', bg: '#f8fafc', header: '#6366f1', accent: '#8b5cf6', text: '#1e293b', plan: 'all' };
   const [showAddTheme, setShowAddTheme]               = useState(false);
-  const [themeForm, setThemeForm]                     = useState({ name: '', primaryColor: '#6366f1', accentColor: '#8b5cf6', plan: 'all' });
+  const [themeForm, setThemeForm]                     = useState(EMPTY_THEME_FORM);
   const [confirmDeleteThemeId, setConfirmDeleteThemeId] = useState<string | null>(null);
 
   const loadSettings = useCallback(async () => {
@@ -187,12 +200,22 @@ export default function StaffDevConsolePage() {
     const newTheme: PortalTheme = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name: themeForm.name.trim(),
-      primaryColor: themeForm.primaryColor,
-      accentColor: themeForm.accentColor,
+      description: themeForm.description.trim() || `${themeForm.name.trim()} theme`,
       plan: themeForm.plan as PortalTheme['plan'],
+      colors: {
+        bg: themeForm.bg,
+        header: themeForm.header,
+        headerText: '#ffffff',
+        accent: themeForm.accent,
+        accentText: '#ffffff',
+        card: '#ffffff',
+        text: themeForm.text,
+        subtext: '#6b7280',
+        border: '#e2e8f0',
+      },
     };
     await patchSetting('themes', [...themes, newTheme], 'themes_add');
-    setThemeForm({ name: '', primaryColor: '#6366f1', accentColor: '#8b5cf6', plan: 'all' });
+    setThemeForm(EMPTY_THEME_FORM);
     setShowAddTheme(false);
   }
 
@@ -373,28 +396,42 @@ export default function StaffDevConsolePage() {
                             className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 outline-none focus:ring-2 focus:ring-amber-500"
                           />
                         </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-gray-400 mb-1">Description</label>
+                          <input
+                            type="text"
+                            value={themeForm.description}
+                            onChange={e => setThemeForm(f => ({ ...f, description: e.target.value }))}
+                            placeholder="e.g. Calming teal palette for environmental orgs."
+                            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
                         <div>
-                          <label className="block text-xs text-gray-400 mb-1">Primary color</label>
+                          <label className="block text-xs text-gray-400 mb-1">Background</label>
                           <div className="flex items-center gap-2">
-                            <input
-                              type="color"
-                              value={themeForm.primaryColor}
-                              onChange={e => setThemeForm(f => ({ ...f, primaryColor: e.target.value }))}
-                              className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5"
-                            />
-                            <span className="text-sm text-gray-300 font-mono">{themeForm.primaryColor}</span>
+                            <input type="color" value={themeForm.bg} onChange={e => setThemeForm(f => ({ ...f, bg: e.target.value }))} className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5" />
+                            <span className="text-sm text-gray-300 font-mono">{themeForm.bg}</span>
                           </div>
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-400 mb-1">Accent color</label>
+                          <label className="block text-xs text-gray-400 mb-1">Header / Primary</label>
                           <div className="flex items-center gap-2">
-                            <input
-                              type="color"
-                              value={themeForm.accentColor}
-                              onChange={e => setThemeForm(f => ({ ...f, accentColor: e.target.value }))}
-                              className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5"
-                            />
-                            <span className="text-sm text-gray-300 font-mono">{themeForm.accentColor}</span>
+                            <input type="color" value={themeForm.header} onChange={e => setThemeForm(f => ({ ...f, header: e.target.value }))} className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5" />
+                            <span className="text-sm text-gray-300 font-mono">{themeForm.header}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Accent / CTA</label>
+                          <div className="flex items-center gap-2">
+                            <input type="color" value={themeForm.accent} onChange={e => setThemeForm(f => ({ ...f, accent: e.target.value }))} className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5" />
+                            <span className="text-sm text-gray-300 font-mono">{themeForm.accent}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Body text</label>
+                          <div className="flex items-center gap-2">
+                            <input type="color" value={themeForm.text} onChange={e => setThemeForm(f => ({ ...f, text: e.target.value }))} className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5" />
+                            <span className="text-sm text-gray-300 font-mono">{themeForm.text}</span>
                           </div>
                         </div>
                         <div className="sm:col-span-2">
@@ -412,7 +449,7 @@ export default function StaffDevConsolePage() {
                       </div>
                       <div className="flex items-center justify-end gap-2 pt-1">
                         <button
-                          onClick={() => { setShowAddTheme(false); setThemeForm({ name: '', primaryColor: '#6366f1', accentColor: '#8b5cf6', plan: 'all' }); }}
+                          onClick={() => { setShowAddTheme(false); setThemeForm(EMPTY_THEME_FORM); }}
                           className="px-3 py-1.5 text-sm font-medium rounded-lg text-gray-400 hover:text-gray-200 transition-colors"
                         >
                           Cancel
@@ -439,17 +476,22 @@ export default function StaffDevConsolePage() {
                         <div key={theme.id} className="flex items-center gap-4 px-4 py-3 bg-gray-800/50 hover:bg-gray-700/30">
                           {/* Color swatches */}
                           <div className="flex gap-1.5 flex-shrink-0">
-                            <div className="w-6 h-6 rounded-full border border-gray-600 shadow-sm" style={{ background: theme.primaryColor }} />
-                            <div className="w-6 h-6 rounded-full border border-gray-600 shadow-sm" style={{ background: theme.accentColor }} />
+                            <div className="w-6 h-6 rounded-full border border-gray-600 shadow-sm" style={{ background: theme.colors.header }} />
+                            <div className="w-6 h-6 rounded-full border border-gray-600 shadow-sm" style={{ background: theme.colors.accent }} />
                           </div>
                           {/* Name + badges */}
-                          <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-gray-100 text-sm">{theme.name}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PLAN_BADGE[theme.plan] ?? PLAN_BADGE.all}`}>
-                              {PLAN_LABEL[theme.plan] ?? 'All Plans'}
-                            </span>
-                            {theme.builtIn && (
-                              <span className="text-xs text-gray-500">built-in</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-gray-100 text-sm">{theme.name}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PLAN_BADGE[theme.plan] ?? PLAN_BADGE.all}`}>
+                                {PLAN_LABEL[theme.plan] ?? 'All Plans'}
+                              </span>
+                              {theme.builtIn && (
+                                <span className="text-xs text-gray-500">built-in</span>
+                              )}
+                            </div>
+                            {theme.description && (
+                              <p className="text-xs text-gray-500 mt-0.5 truncate">{theme.description}</p>
                             )}
                           </div>
                           {/* Delete */}
