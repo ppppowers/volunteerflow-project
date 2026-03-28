@@ -125,7 +125,7 @@ interface VolunteerEvent {
   contactPhone?: string;
   notes?: string;
   needLead?: boolean;
-  leadRole?: string;
+  leadTag?: string;
 }
 
 type PageView = 'list' | 'builder' | 'detail';
@@ -443,7 +443,7 @@ interface ApiEvent {
   contactPhone?: string;
   notes?: string;
   needLead?: boolean;
-  leadRole?: string;
+  leadTag?: string;
   registrationDeadline?: string;
   shifts?: Shift[];
   eligibility?: EligibilitySettings;
@@ -494,7 +494,7 @@ function mapApiEvent(v: ApiEvent): VolunteerEvent {
     contactPhone: v.contactPhone,
     notes: v.notes,
     needLead: v.needLead ?? false,
-    leadRole: v.leadRole,
+    leadTag: v.leadTag,
   };
 }
 
@@ -522,7 +522,7 @@ function toApiEvent(ev: VolunteerEvent): Record<string, unknown> {
     shifts: ev.shifts,
     eligibility: ev.eligibility,
     needLead: ev.needLead ?? false,
-    leadRole: ev.leadRole ?? '',
+    leadTag: ev.leadTag ?? '',
   };
 }
 
@@ -562,11 +562,16 @@ export default function Events() {
   const coverFileRef = useRef<HTMLInputElement>(null);
   const galleryFileRef = useRef<HTMLInputElement>(null);
 
-  // Tag input
+  // Event tag input (for the event's own tags array)
   const [tagInput, setTagInput] = useState('');
 
   // Custom requirement input
   const [requirementInput, setRequirementInput] = useState('');
+
+  // Org volunteer tags (for lead tag picker)
+  const [orgVolunteerTags, setOrgVolunteerTags] = useState<string[]>([]);
+  const [leadTagInput, setLeadTagInput] = useState('');
+  const [showLeadTagDropdown, setShowLeadTagDropdown] = useState(false);
 
   // Fetch events from backend on mount; fall back to mock data if unreachable
   useEffect(() => {
@@ -587,6 +592,13 @@ export default function Events() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+  }, []);
+
+  // Load org's volunteer tags for the lead-tag picker
+  useEffect(() => {
+    api.get<{ data: string[] }>('/volunteers/tags')
+      .then(res => setOrgVolunteerTags((res as unknown as { data: string[] }).data ?? []))
+      .catch(() => {});
   }, []);
 
   // ── Builder helpers ────────────────────────────────────────────────────
@@ -1222,14 +1234,68 @@ export default function Events() {
 
             {editingEvent.needLead && (
               <div className="space-y-3">
-                <Field label="Required Role to Lead">
-                  <input
-                    type="text"
-                    value={editingEvent.leadRole ?? ''}
-                    onChange={(e) => updateField('leadRole', e.target.value || undefined)}
-                    placeholder="e.g. Team Leader, Event Coordinator"
-                    className={inputClass}
-                  />
+                <Field label="Required Tag to Lead">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={leadTagInput !== '' ? leadTagInput : (editingEvent.leadTag ?? '')}
+                      onChange={(e) => {
+                        setLeadTagInput(e.target.value);
+                        setShowLeadTagDropdown(true);
+                        if (!e.target.value) updateField('leadTag', undefined);
+                      }}
+                      onFocus={() => setShowLeadTagDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowLeadTagDropdown(false), 150)}
+                      placeholder="Search or type a tag…"
+                      className={inputClass}
+                    />
+                    {showLeadTagDropdown && (
+                      <div className="absolute z-50 w-full mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        {orgVolunteerTags
+                          .filter(t => !leadTagInput || t.toLowerCase().includes(leadTagInput.toLowerCase()))
+                          .map(tag => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onMouseDown={() => {
+                                updateField('leadTag', tag);
+                                setLeadTagInput('');
+                                setShowLeadTagDropdown(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-700 ${editingEvent.leadTag === tag ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-neutral-700 dark:text-neutral-300'}`}
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        {leadTagInput.trim() && !orgVolunteerTags.some(t => t.toLowerCase() === leadTagInput.toLowerCase()) && (
+                          <button
+                            type="button"
+                            onMouseDown={() => {
+                              updateField('leadTag', leadTagInput.trim());
+                              setLeadTagInput('');
+                              setShowLeadTagDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                          >
+                            Use &ldquo;{leadTagInput.trim()}&rdquo;
+                          </button>
+                        )}
+                        {orgVolunteerTags.length === 0 && !leadTagInput && (
+                          <p className="px-3 py-2 text-xs text-neutral-400">No volunteer tags yet — type to set one</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {editingEvent.leadTag && (
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-xs font-medium rounded-md border border-violet-200 dark:border-violet-800">
+                        {editingEvent.leadTag}
+                        <button type="button" onClick={() => { updateField('leadTag', undefined); setLeadTagInput(''); }} className="hover:text-red-500">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    </div>
+                  )}
                 </Field>
               </div>
             )}
@@ -1689,8 +1755,8 @@ export default function Events() {
               {activeEvent.needLead && !activeEvent.contactName ? (
                 <p className="text-sm text-neutral-500 dark:text-neutral-400">
                   Open to volunteers
-                  {activeEvent.leadRole ? (
-                    <> with role <span className="font-semibold text-primary-600 dark:text-primary-400">{activeEvent.leadRole}</span></>
+                  {activeEvent.leadTag ? (
+                    <> with tag <span className="font-semibold text-violet-600 dark:text-violet-400">{activeEvent.leadTag}</span></>
                   ) : null}
                 </p>
               ) : (

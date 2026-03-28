@@ -149,6 +149,7 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_volunteers_org_id ON volunteers(org_id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_volunteers_email_org ON volunteers(email, org_id);
   ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS password_hash TEXT;
+  ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]';
 
   -- ── Events ────────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS events (
@@ -180,6 +181,8 @@ const SCHEMA_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_events_org_id ON events(org_id);
+  ALTER TABLE events ADD COLUMN IF NOT EXISTS need_lead BOOLEAN NOT NULL DEFAULT false;
+  ALTER TABLE events ADD COLUMN IF NOT EXISTS lead_tag TEXT NOT NULL DEFAULT '';
 
   -- ── Applications (volunteer ↔ event) ─────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS applications (

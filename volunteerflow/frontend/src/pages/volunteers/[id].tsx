@@ -11,7 +11,7 @@ import {
   Hash, Clock, History, FileText, ExternalLink, TrendingUp, Award, Target,
   Users, Briefcase, CheckSquare, Square, Plus, Trash2, CheckCircle2,
   Settings, Shield, BadgeCheck, AlarmCheck, CheckCircle, AlertTriangle,
-  GraduationCap,
+  GraduationCap, Tag,
 } from 'lucide-react';
 import {
   mockVolunteers, defaultChecklistTemplates, defaultCertificationTemplates,
@@ -31,6 +31,7 @@ interface ApiVolunteer {
   joinDate?: string;
   avatar?: string;
   skills?: string[];
+  tags?: string[];
   hoursContributed?: number;
   status: string;
 }
@@ -78,6 +79,41 @@ export default function VolunteerDetail() {
     status: 'active' as 'active' | 'inactive' | 'pending', avatar: '',
   });
 
+  // ── Tag management ────────────────────────────────────────────────────────
+  const [orgTags, setOrgTags] = useState<string[]>([]);
+  const [tagPickerInput, setTagPickerInput] = useState('');
+  const [showTagPicker, setShowTagPicker] = useState(false);
+
+  useEffect(() => {
+    api.get<{ data: string[] }>('/volunteers/tags')
+      .then(res => setOrgTags((res as unknown as { data: string[] }).data ?? []))
+      .catch(() => {});
+  }, []);
+
+  const saveVolunteerTags = async (tags: string[]) => {
+    if (!volunteer) return;
+    try {
+      await api.put(`/volunteers/${volunteer.id}`, { tags });
+      setVolunteer({ ...volunteer, tags });
+      const unique = Array.from(new Set([...orgTags, ...tags])).sort();
+      setOrgTags(unique);
+    } catch {
+      // silently ignore if backend offline
+    }
+  };
+
+  const addTag = (tag: string) => {
+    if (!volunteer || volunteer.tags?.includes(tag)) return;
+    saveVolunteerTags([...(volunteer.tags ?? []), tag]);
+    setTagPickerInput('');
+    setShowTagPicker(false);
+  };
+
+  const removeTag = (tag: string) => {
+    if (!volunteer) return;
+    saveVolunteerTags((volunteer.tags ?? []).filter(t => t !== tag));
+  };
+
   useEffect(() => {
     if (!id) return;
     api.get<ApiVolunteer>(`/volunteers/${id}`)
@@ -97,6 +133,7 @@ export default function VolunteerDetail() {
           eventsCompleted: 0,
           hoursContributed: data.hoursContributed ?? 0,
           skills: data.skills ?? [],
+          tags: data.tags ?? [],
           rating: 0,
           avatar: data.avatar ?? '',
           events: [],
@@ -445,6 +482,89 @@ export default function VolunteerDetail() {
                   )) : <p className="text-sm text-neutral-500 dark:text-neutral-400 italic">No skills listed</p>}
                 </div>
               )}
+            </Card>
+
+            {/* Org Tags */}
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-5 h-5 text-violet-500 dark:text-violet-400" />
+                  <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Org Tags</h3>
+                </div>
+                <span className="text-xs text-neutral-400 dark:text-neutral-500">Visible to org only</span>
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                {(volunteer.tags ?? []).map(tag => (
+                  <span key={tag} className="flex items-center gap-1 px-3 py-1 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-sm font-medium rounded-full">
+                    {tag}
+                    <button
+                      onClick={() => removeTag(tag)}
+                      className="hover:text-violet-900 dark:hover:text-violet-100 transition-colors ml-0.5"
+                      title={`Remove tag "${tag}"`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ))}
+                <div className="relative">
+                  <button
+                    onClick={() => { setShowTagPicker(v => !v); setTagPickerInput(''); }}
+                    className="flex items-center gap-1.5 px-3 py-1 border border-dashed border-violet-300 dark:border-violet-700 text-violet-500 dark:text-violet-400 text-sm font-medium rounded-full hover:border-violet-500 hover:text-violet-700 dark:hover:border-violet-500 dark:hover:text-violet-200 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Tag
+                  </button>
+                  {showTagPicker && (
+                    <div
+                      className="absolute top-full left-0 mt-1 w-56 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg z-20 overflow-hidden"
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      <div className="p-2 border-b border-neutral-100 dark:border-neutral-700">
+                        <input
+                          autoFocus
+                          type="text"
+                          placeholder="Search or create tag..."
+                          value={tagPickerInput}
+                          onChange={(e) => setTagPickerInput(e.target.value)}
+                          onBlur={() => setTimeout(() => setShowTagPicker(false), 150)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && tagPickerInput.trim()) addTag(tagPickerInput.trim());
+                            else if (e.key === 'Escape') setShowTagPicker(false);
+                          }}
+                          className="w-full px-2 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-violet-400"
+                        />
+                      </div>
+                      <div className="max-h-40 overflow-y-auto py-1">
+                        {orgTags
+                          .filter(t => !(volunteer.tags ?? []).includes(t) && t.toLowerCase().includes(tagPickerInput.toLowerCase()))
+                          .map(t => (
+                            <button
+                              key={t}
+                              onMouseDown={() => addTag(t)}
+                              className="w-full text-left px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+                            >
+                              {t}
+                            </button>
+                          ))
+                        }
+                        {tagPickerInput.trim() && !orgTags.includes(tagPickerInput.trim()) && (
+                          <button
+                            onMouseDown={() => addTag(tagPickerInput.trim())}
+                            className="w-full text-left px-3 py-2 text-sm text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors font-medium"
+                          >
+                            + Create &ldquo;{tagPickerInput.trim()}&rdquo;
+                          </button>
+                        )}
+                        {orgTags.filter(t => !(volunteer.tags ?? []).includes(t) && t.toLowerCase().includes(tagPickerInput.toLowerCase())).length === 0 && !tagPickerInput.trim() && (
+                          <p className="px-3 py-2 text-sm text-neutral-400">Type to search or create a tag</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {(volunteer.tags ?? []).length === 0 && !showTagPicker && (
+                  <p className="text-sm text-neutral-400 dark:text-neutral-500 italic">No tags yet</p>
+                )}
+              </div>
             </Card>
 
             {volunteer.applicationId && (

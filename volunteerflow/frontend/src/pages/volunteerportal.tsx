@@ -177,9 +177,67 @@ function formatJoinDate(dateStr: string): string {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
+// ─── Portal Theme ─────────────────────────────────────────────────────────────
+
+interface PortalColors {
+  bg: string;
+  header: string;
+  headerText: string;
+  accent: string;
+  accentText: string;
+  card: string;
+  text: string;
+  subtext: string;
+  border: string;
+}
+
+const DEFAULT_COLORS: PortalColors = {
+  bg: '#f8fafc',
+  header: '#2563eb',
+  headerText: '#ffffff',
+  accent: '#2563eb',
+  accentText: '#ffffff',
+  card: '#ffffff',
+  text: '#1e293b',
+  subtext: '#64748b',
+  border: '#e2e8f0',
+};
+
+function blendRgb(c1: number[], c2: number[], t: number): string {
+  return c1.map((v, i) => Math.round(v + (c2[i] - v) * t)).join(' ');
+}
+
+function applyPrimaryPalette(accentHex: string) {
+  if (typeof window === 'undefined') return;
+  const h = accentHex.replace('#', '');
+  if (h.length !== 6) return;
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return;
+  const color = [r, g, b];
+  const white = [255, 255, 255];
+  const black = [0, 0, 0];
+  const vars: Record<string, string> = {
+    '--primary-50':  blendRgb(white, color, 0.06),
+    '--primary-100': blendRgb(white, color, 0.13),
+    '--primary-200': blendRgb(white, color, 0.26),
+    '--primary-300': blendRgb(white, color, 0.44),
+    '--primary-400': blendRgb(white, color, 0.64),
+    '--primary-500': color.join(' '),
+    '--primary-600': blendRgb(color, black, 0.18),
+    '--primary-700': blendRgb(color, black, 0.34),
+    '--primary-800': blendRgb(color, black, 0.48),
+    '--primary-900': blendRgb(color, black, 0.60),
+  };
+  Object.entries(vars).forEach(([prop, val]) => {
+    document.documentElement.style.setProperty(prop, val);
+  });
+}
+
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
-function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }) {
+function LoginPage({ onLogin, portalColors }: { onLogin: (profile: VolunteerProfile) => void; portalColors: PortalColors }) {
   const [mode, setMode]         = useState<'login' | 'setup'>('login');
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
@@ -247,7 +305,7 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
   };
 
   const leftPanel = (
-    <div className="hidden md:flex md:w-[440px] lg:w-[480px] flex-shrink-0 bg-neutral-900 dark:bg-neutral-950 flex-col justify-end p-12 relative overflow-hidden">
+    <div className="hidden md:flex md:w-[440px] lg:w-[480px] flex-shrink-0 flex-col justify-end p-12 relative overflow-hidden" style={{ backgroundColor: portalColors.header }}>
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute -top-36 -left-24 w-[500px] h-[500px] rounded-full bg-primary-500 opacity-10" />
         <div className="absolute bottom-20 -right-16 w-72 h-72 rounded-full bg-primary-400 opacity-10" />
@@ -395,26 +453,43 @@ function LoginPage({ onLogin }: { onLogin: (profile: VolunteerProfile) => void }
 
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
-function TopBar({ profile, onLogout }: { profile: VolunteerProfile; onLogout: () => void }) {
+function TopBar({ profile, onLogout, portalColors }: { profile: VolunteerProfile; onLogout: () => void; portalColors: PortalColors }) {
+  const isLight = isLightColor(portalColors.header);
+  const textCls = isLight ? 'text-neutral-800' : 'text-white';
+  const mutedCls = isLight ? 'text-neutral-500' : 'text-white/60';
+  const badgeCls = isLight
+    ? 'bg-black/10 border-black/10 text-neutral-700'
+    : 'bg-white/15 border-white/10 text-white/80';
+  const avatarBg = isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.2)';
   return (
-    <div className="h-14 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-700 flex items-center px-4 gap-3 sticky top-0 z-50">
+    <div className="h-14 flex items-center px-4 gap-3 sticky top-0 z-50" style={{ backgroundColor: portalColors.header }}>
       <div className="flex items-center gap-2 mr-auto">
-        <div className="w-7 h-7 bg-primary-600 dark:bg-primary-500 rounded-lg flex items-center justify-center">
-          <span className="text-white font-bold text-xs">V</span>
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: isLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.2)' }}>
+          <span className={`font-bold text-xs ${textCls}`}>V</span>
         </div>
-        <span className="font-bold text-neutral-900 dark:text-neutral-100 text-sm">VolunteerFlow</span>
+        <span className={`font-bold text-sm ${textCls}`}>VolunteerFlow</span>
       </div>
-      <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 bg-neutral-100 dark:bg-neutral-800 px-2.5 py-1 rounded-full border border-neutral-200 dark:border-neutral-700">
+      <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${badgeCls}`}>
         Volunteer
       </span>
-      <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center text-primary-700 dark:text-primary-300 font-bold text-xs border-2 border-primary-200 dark:border-primary-700">
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border-2 ${textCls}`} style={{ backgroundColor: avatarBg, borderColor: isLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.3)' }}>
         {getInitials(profile.name)}
       </div>
-      <button onClick={onLogout} className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors px-2 py-1">
+      <button onClick={onLogout} className={`text-xs transition-colors px-2 py-1 ${mutedCls} hover:opacity-100`}>
         Sign out
       </button>
     </div>
   );
+}
+
+function isLightColor(hex: string): boolean {
+  const h = hex.replace('#', '');
+  if (h.length !== 6) return false;
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  // Perceived luminance (WCAG formula)
+  return (r * 299 + g * 587 + b * 114) / 1000 > 155;
 }
 
 // ─── Bottom Nav ───────────────────────────────────────────────────────────────
@@ -480,12 +555,13 @@ function DateBlock({ month, day, dark = false, muted = false }: { month: string;
 // ─── Home Tab ─────────────────────────────────────────────────────────────────
 
 function HomeTab({
-  profile, signups, events, setTab,
+  profile, signups, events, setTab, portalColors,
 }: {
   profile: VolunteerProfile;
   signups: PortalSignup[];
   events: PortalEvent[];
   setTab: (t: Tab) => void;
+  portalColors: PortalColors;
 }) {
   const now = new Date();
   const upcomingSignups = signups.filter(s => isUpcoming(s.start_date));
@@ -502,7 +578,7 @@ function HomeTab({
   return (
     <div>
       {/* Hero */}
-      <div className="bg-neutral-900 dark:bg-neutral-800 rounded-2xl p-6 mb-5 relative overflow-hidden">
+      <div className="rounded-2xl p-6 mb-5 relative overflow-hidden" style={{ backgroundColor: portalColors.header }}>
         <div className="absolute inset-0 pointer-events-none">
           <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-primary-500 opacity-10" />
           <div className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full bg-primary-400 opacity-8" />
@@ -1582,7 +1658,7 @@ function ProfileTab({ profile, onProfileUpdate, showToast }: {
 
 // ─── Dashboard Shell ──────────────────────────────────────────────────────────
 
-function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerProfile; onLogout: () => void }) {
+function Dashboard({ profile: initialProfile, onLogout, portalColors }: { profile: VolunteerProfile; onLogout: () => void; portalColors: PortalColors }) {
   const [tab, setTab]         = useState<Tab>('home');
   const [profile, setProfile] = useState(initialProfile);
   const [events, setEvents]   = useState<PortalEvent[]>([]);
@@ -1677,8 +1753,8 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
   const trainingCount = courses.filter(c => !c.completed).length;
 
   if (loading) return (
-    <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950">
-      <div className="h-14 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-700 sticky top-0 z-50" />
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: portalColors.bg }}>
+      <div className="h-14 sticky top-0 z-50" style={{ backgroundColor: portalColors.header }} />
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center text-neutral-400 dark:text-neutral-500">
           <div className="w-8 h-8 border-2 border-primary-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -1689,10 +1765,10 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950">
-      <TopBar profile={profile} onLogout={onLogout} />
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: portalColors.bg }}>
+      <TopBar profile={profile} onLogout={onLogout} portalColors={portalColors} />
       <div className="flex-1 px-5 py-6 pb-24 max-w-2xl mx-auto w-full">
-        {tab === 'home'     && <HomeTab profile={profile} signups={signups} events={events} setTab={setTab} />}
+        {tab === 'home'     && <HomeTab profile={profile} signups={signups} events={events} setTab={setTab} portalColors={portalColors} />}
         {tab === 'events'   && <EventsTab events={events} signups={signups} onSignup={handleSignup} onCancel={handleCancel} showToast={showToast} />}
         {tab === 'myevents' && <MyEventsTab signups={signups} onCancel={handleCancel} showToast={showToast} />}
         {tab === 'training' && <TrainingTab courses={courses} onSectionComplete={handleSectionComplete} onCourseComplete={handleCourseComplete} showToast={showToast} />}
@@ -1713,8 +1789,27 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
 
 export default function VolunteerPortal() {
   const [profile, setProfile] = useState<VolunteerProfile | null>(null);
+  const [portalColors, setPortalColors] = useState<PortalColors>(DEFAULT_COLORS);
 
-  // Restore session from localStorage on mount
+  // Load org portal theme (public endpoint — no auth needed)
+  useEffect(() => {
+    Promise.allSettled([
+      fetch(`${BASE_URL}/portal/settings/volunteer`).then(r => r.json()),
+      fetch(`${BASE_URL}/portal/themes`).then(r => r.json()),
+    ]).then(([settingsRes, themesRes]) => {
+      if (settingsRes.status !== 'fulfilled' || themesRes.status !== 'fulfilled') return;
+      const settings = settingsRes.value as { themeId?: string };
+      const themes = themesRes.value as Array<{ id: string; colors?: PortalColors }>;
+      const themeId = settings.themeId ?? 'default';
+      const theme = themes.find(t => t.id === themeId) ?? themes[0];
+      if (theme?.colors) {
+        setPortalColors(theme.colors);
+        applyPrimaryPalette(theme.colors.accent);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Restore session on mount
   useEffect(() => {
     const token = sessionStorage.getItem(VP_TOKEN_KEY);
     if (!token) return;
@@ -1734,8 +1829,8 @@ export default function VolunteerPortal() {
     <>
       <Head><title>Volunteer Portal — VolunteerFlow</title></Head>
       {profile
-        ? <Dashboard profile={profile} onLogout={handleLogout} />
-        : <LoginPage onLogin={setProfile} />
+        ? <Dashboard profile={profile} onLogout={handleLogout} portalColors={portalColors} />
+        : <LoginPage onLogin={setProfile} portalColors={portalColors} />
       }
     </>
   );

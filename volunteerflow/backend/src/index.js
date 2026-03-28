@@ -277,6 +277,7 @@ function mapVolunteer(r) {
     joinDate: r.join_date,
     avatar: r.avatar,
     skills: r.skills ?? [],
+    tags: r.tags ?? [],
     hoursContributed: r.hours_contributed,
     status: r.status,
   };
@@ -306,6 +307,8 @@ function mapEvent(r) {
     registrationDeadline: r.registration_deadline,
     shifts: r.shifts ?? [],
     eligibility: r.eligibility ?? { allowedStatuses: ['approved'], requireApplication: false, requireBackgroundCheck: false, customRequirements: [] },
+    needLead: r.need_lead ?? false,
+    leadTag: r.lead_tag ?? '',
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     participantCount: parseInt(r.participant_count ?? 0, 10),
@@ -381,19 +384,19 @@ function formatBytes(bytes) {
 }
 
 // ===== ALLOWED FIELDS =====
-const VOLUNTEER_UPDATABLE = ['firstName', 'lastName', 'email', 'phone', 'location', 'joinDate', 'avatar', 'skills', 'status', 'hoursContributed'];
+const VOLUNTEER_UPDATABLE = ['firstName', 'lastName', 'email', 'phone', 'location', 'joinDate', 'avatar', 'skills', 'tags', 'status', 'hoursContributed'];
 const VOLUNTEER_COL_MAP = {
   firstName: 'first_name', lastName: 'last_name', email: 'email',
   phone: 'phone', location: 'location', joinDate: 'join_date',
-  avatar: 'avatar', skills: 'skills', hoursContributed: 'hours_contributed', status: 'status',
+  avatar: 'avatar', skills: 'skills', tags: 'tags', hoursContributed: 'hours_contributed', status: 'status',
 };
-const VOLUNTEER_JSONB = new Set(['skills']);
+const VOLUNTEER_JSONB = new Set(['skills', 'tags']);
 
 const EVENT_UPDATABLE = [
   'title','description','category','location','address','startDate','endDate',
   'spotsAvailable','maxVolunteers','status','visibility','tags','coverImage',
   'images','contactName','contactEmail','contactPhone','notes',
-  'registrationDeadline','shifts','eligibility',
+  'registrationDeadline','shifts','eligibility','needLead','leadTag',
 ];
 const EVENT_COL_MAP = {
   title: 'title', description: 'description', category: 'category',
@@ -403,6 +406,7 @@ const EVENT_COL_MAP = {
   images: 'images', contactName: 'contact_name', contactEmail: 'contact_email',
   contactPhone: 'contact_phone', notes: 'notes',
   registrationDeadline: 'registration_deadline', shifts: 'shifts', eligibility: 'eligibility',
+  needLead: 'need_lead', leadTag: 'lead_tag',
 };
 const EVENT_JSONB = new Set(['tags', 'images', 'shifts', 'eligibility']);
 
@@ -1193,6 +1197,22 @@ app.delete('/api/data/account', requireAuth, async (req, res) => {
 app.use('/api/staff', createStaffRouter(pool));
 
 // ===== VOLUNTEERS CRUD =====
+
+// Returns all unique tags used by this org's volunteers (for autocomplete/filtering)
+app.get('/api/volunteers/tags', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT jsonb_array_elements_text(tags) AS tag
+       FROM volunteers WHERE org_id = $1 ORDER BY tag`,
+      [req.orgId]
+    );
+    res.json({ success: true, data: rows.map(r => r.tag) });
+  } catch (err) {
+    console.error('GET /api/volunteers/tags error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch tags' });
+  }
+});
+
 app.get('/api/volunteers', requireAuth, async (req, res) => {
   try {
     const page = parseIntParam(req.query.page, 1, 1);

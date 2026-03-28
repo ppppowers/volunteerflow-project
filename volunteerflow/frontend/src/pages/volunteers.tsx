@@ -32,6 +32,7 @@ import {
   RefreshCw,
   Check,
   FileText,
+  Tag,
 } from 'lucide-react';
 
 // --- Types ---
@@ -113,6 +114,7 @@ interface Volunteer {
   eventsCompleted: number;
   hoursContributed: number;
   skills: string[];
+  tags: string[];
   rating: number;
   avatar?: string;
   applicationId?: string;
@@ -397,6 +399,7 @@ interface ApiVolunteer {
   email: string;
   phone?: string;
   skills?: string[];
+  tags?: string[];
   hoursContributed?: number;
   status: string;
 }
@@ -417,6 +420,7 @@ function mapApiVolunteer(v: ApiVolunteer): Volunteer {
     eventsCompleted: 0,
     hoursContributed: v.hoursContributed ?? 0,
     skills: v.skills ?? [],
+    tags: v.tags ?? [],
     rating: 0,
     events: [],
     checklist: [],
@@ -461,6 +465,7 @@ export default function Volunteers() {
         eventsCompleted: 0,
         hoursContributed: 0,
         skills: v.skills ? v.skills.split(',').map((s) => s.trim()).filter(Boolean) : [],
+        tags: [],
         rating: 0,
         events: [],
         checklist: [],
@@ -470,6 +475,44 @@ export default function Volunteers() {
       setImporting(false);
       setImportStep('done');
     }, 1200);
+  };
+
+  // ── Tag management ────────────────────────────────────────────────────────
+  const [orgTags, setOrgTags] = useState<string[]>([]);
+  const [tagFilter, setTagFilter] = useState<string>('all');
+  const [editingTagsFor, setEditingTagsFor] = useState<string | null>(null);
+  const [tagPickerInput, setTagPickerInput] = useState('');
+
+  useEffect(() => {
+    api.get<{ data: string[] }>('/volunteers/tags')
+      .then(res => setOrgTags((res as unknown as { data: string[] }).data ?? []))
+      .catch(() => {});
+  }, []);
+
+  const saveVolunteerTags = async (volunteerId: string, tags: string[]) => {
+    try {
+      await api.put(`/volunteers/${volunteerId}`, { tags });
+      setVolunteers(prev => prev.map(v => v.id === volunteerId ? { ...v, tags } : v));
+      // Refresh org tag list
+      const unique = Array.from(new Set([...orgTags, ...tags])).sort();
+      setOrgTags(unique);
+    } catch {
+      toast.error('Failed to save tags');
+    }
+  };
+
+  const addTagToVolunteer = (volunteerId: string, tag: string) => {
+    const vol = volunteers.find(v => v.id === volunteerId);
+    if (!vol || vol.tags.includes(tag)) return;
+    saveVolunteerTags(volunteerId, [...vol.tags, tag]);
+    setTagPickerInput('');
+    setEditingTagsFor(null);
+  };
+
+  const removeTagFromVolunteer = (volunteerId: string, tag: string) => {
+    const vol = volunteers.find(v => v.id === volunteerId);
+    if (!vol) return;
+    saveVolunteerTags(volunteerId, vol.tags.filter(t => t !== tag));
   };
 
   // Form state
@@ -548,11 +591,13 @@ export default function Volunteers() {
       volunteer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       volunteer.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
       volunteer.volunteerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      volunteer.skills.some(skill => skill.toLowerCase().includes(searchTerm.toLowerCase()));
+      volunteer.skills.some(skill => skill.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      volunteer.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesStatus = statusFilter === 'all' || volunteer.status === statusFilter;
+    const matchesTag = tagFilter === 'all' || volunteer.tags.includes(tagFilter);
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesTag;
   });
 
   const totalPages = Math.max(1, Math.ceil(filteredVolunteers.length / PAGE_SIZE));
@@ -821,13 +866,21 @@ export default function Volunteers() {
               <Filter className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
                 className="px-4 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-transparent transition-colors"
               >
                 <option value="all">All Status</option>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
                 <option value="pending">Pending</option>
+              </select>
+              <select
+                value={tagFilter}
+                onChange={(e) => { setTagFilter(e.target.value); setPage(1); }}
+                className="px-4 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-transparent transition-colors"
+              >
+                <option value="all">All Tags</option>
+                {orgTags.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
           </div>
@@ -942,6 +995,92 @@ export default function Volunteers() {
                     <p className="text-xs text-neutral-500 dark:text-neutral-400">Hours</p>
                   </div>
                 </div>
+
+                {/* Tags */}
+                {(volunteer.tags.length > 0 || true) && (
+                  <div className="mb-4">
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {volunteer.tags.map(tag => (
+                        <span
+                          key={tag}
+                          className="flex items-center gap-1 px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-xs font-medium rounded-full"
+                        >
+                          {tag}
+                          <button
+                            onClick={() => removeTagFromVolunteer(volunteer.id, tag)}
+                            className="hover:text-violet-900 dark:hover:text-violet-100 transition-colors"
+                            title={`Remove tag "${tag}"`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      <div className="relative">
+                        <button
+                          onClick={() => {
+                            setEditingTagsFor(editingTagsFor === volunteer.id ? null : volunteer.id);
+                            setTagPickerInput('');
+                          }}
+                          className="flex items-center gap-1 px-2 py-0.5 border border-dashed border-violet-300 dark:border-violet-700 text-violet-500 dark:text-violet-400 text-xs font-medium rounded-full hover:border-violet-500 hover:text-violet-700 dark:hover:border-violet-500 dark:hover:text-violet-200 transition-colors"
+                          title="Add tag"
+                        >
+                          <Tag className="w-3 h-3" />
+                          Tag
+                        </button>
+                        {editingTagsFor === volunteer.id && (
+                          <div
+                            className="absolute bottom-full left-0 mb-1 w-52 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg z-20 overflow-hidden"
+                            onMouseDown={(e) => e.preventDefault()}
+                          >
+                            <div className="p-2 border-b border-neutral-100 dark:border-neutral-700">
+                              <input
+                                autoFocus
+                                type="text"
+                                placeholder="Search or create tag..."
+                                value={tagPickerInput}
+                                onChange={(e) => setTagPickerInput(e.target.value)}
+                                onBlur={() => setTimeout(() => setEditingTagsFor(null), 150)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && tagPickerInput.trim()) {
+                                    addTagToVolunteer(volunteer.id, tagPickerInput.trim());
+                                  } else if (e.key === 'Escape') {
+                                    setEditingTagsFor(null);
+                                  }
+                                }}
+                                className="w-full px-2 py-1.5 text-xs border border-neutral-200 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-violet-400"
+                              />
+                            </div>
+                            <div className="max-h-36 overflow-y-auto py-1">
+                              {orgTags
+                                .filter(t => !volunteer.tags.includes(t) && t.toLowerCase().includes(tagPickerInput.toLowerCase()))
+                                .map(t => (
+                                  <button
+                                    key={t}
+                                    onMouseDown={() => addTagToVolunteer(volunteer.id, t)}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
+                                  >
+                                    {t}
+                                  </button>
+                                ))
+                              }
+                              {tagPickerInput.trim() && !orgTags.includes(tagPickerInput.trim()) && (
+                                <button
+                                  onMouseDown={() => addTagToVolunteer(volunteer.id, tagPickerInput.trim())}
+                                  className="w-full text-left px-3 py-1.5 text-xs text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors font-medium"
+                                >
+                                  + Create &ldquo;{tagPickerInput.trim()}&rdquo;
+                                </button>
+                              )}
+                              {orgTags.filter(t => !volunteer.tags.includes(t) && t.toLowerCase().includes(tagPickerInput.toLowerCase())).length === 0 && !tagPickerInput.trim() && (
+                                <p className="px-3 py-2 text-xs text-neutral-400">Type to search or create a tag</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* View Details Button */}
                 <Link href={`/volunteers/${volunteer.id}`}>
