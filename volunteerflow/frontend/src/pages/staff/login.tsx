@@ -13,14 +13,14 @@ export default function StaffLogin() {
     setLoading(true); setError('');
     try {
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-      const raw = await fetch(`${baseUrl}/auth/login`, {
+      const raw = await fetch(`${baseUrl}/staff/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
       const res = await raw.json();
       if (!raw.ok) throw new Error(res?.error ?? 'Login failed');
-      const { token, user } = res.data ?? res;
+      const { token, user } = res;
       sessionStorage.setItem('vf_staff_token', token);
       sessionStorage.setItem('vf_staff_user', JSON.stringify(user));
       router.replace('/staff');
