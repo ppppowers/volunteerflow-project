@@ -720,6 +720,7 @@ export default function Volunteers() {
         eventsCompleted: 0,
         hoursContributed: 0,
         skills,
+        tags: [],
         rating: 0,
         avatar: formData.avatar,
         events: [],
