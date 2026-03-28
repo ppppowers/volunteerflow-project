@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Terminal } from 'lucide-react';
+import { Terminal, Palette, Plus, Trash2 } from 'lucide-react';
 import { StaffLayout } from '@/components/staff/StaffLayout';
 import { PermissionGate } from '@/components/staff/PermissionGate';
 import { PERMISSIONS } from '@/lib/staffPermissions';
@@ -54,6 +54,29 @@ const CATEGORY_LABEL: Record<FlagCategory, string> = {
   deprecated:   'Deprecated',
 };
 
+// ─── Portal Theme ─────────────────────────────────────────────────────────────
+
+interface PortalTheme {
+  id: string;
+  name: string;
+  primaryColor: string;
+  accentColor: string;
+  plan: 'all' | 'grow' | 'enterprise';
+  builtIn?: boolean;
+}
+
+const PLAN_BADGE: Record<string, string> = {
+  all:        'bg-green-900/40 text-green-300 border border-green-700',
+  grow:       'bg-blue-900/40 text-blue-300 border border-blue-700',
+  enterprise: 'bg-purple-900/40 text-purple-300 border border-purple-700',
+};
+
+const PLAN_LABEL: Record<string, string> = {
+  all:        'All Plans',
+  grow:       'Grow+',
+  enterprise: 'Enterprise',
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function StaffDevConsolePage() {
@@ -69,6 +92,11 @@ export default function StaffDevConsolePage() {
   const [maintMsg, setMaintMsg]     = useState('');
   const [savingSignupMsg, setSavingSignupMsg] = useState(false);
   const [savingMaintMsg, setSavingMaintMsg]   = useState(false);
+
+  // ── Theme management ────────────────────────────────────────────────────────
+  const [showAddTheme, setShowAddTheme]               = useState(false);
+  const [themeForm, setThemeForm]                     = useState({ name: '', primaryColor: '#6366f1', accentColor: '#8b5cf6', plan: 'all' });
+  const [confirmDeleteThemeId, setConfirmDeleteThemeId] = useState<string | null>(null);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -148,6 +176,29 @@ export default function StaffDevConsolePage() {
     } finally {
       setSavingMaintMsg(false);
     }
+  }
+
+  // ── Theme helpers ───────────────────────────────────────────────────────────
+
+  const themes: PortalTheme[] = Array.isArray(settings.themes) ? (settings.themes as PortalTheme[]) : [];
+
+  async function addTheme() {
+    if (!themeForm.name.trim()) return;
+    const newTheme: PortalTheme = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: themeForm.name.trim(),
+      primaryColor: themeForm.primaryColor,
+      accentColor: themeForm.accentColor,
+      plan: themeForm.plan as PortalTheme['plan'],
+    };
+    await patchSetting('themes', [...themes, newTheme], 'themes_add');
+    setThemeForm({ name: '', primaryColor: '#6366f1', accentColor: '#8b5cf6', plan: 'all' });
+    setShowAddTheme(false);
+  }
+
+  async function deleteTheme(id: string) {
+    await patchSetting('themes', themes.filter(t => t.id !== id), `theme_del_${id}`);
+    setConfirmDeleteThemeId(null);
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -291,7 +342,152 @@ export default function StaffDevConsolePage() {
                   </div>
                 </section>
 
-                {/* ── Section 2: Feature Flags ──────────────────────────────── */}
+                {/* ── Section 2: Portal Themes ───────────────────────────────── */}
+                <section className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Palette className="w-4 h-4 text-amber-400" />
+                      <h2 className="text-amber-400 font-semibold text-sm uppercase tracking-wider">Portal Themes</h2>
+                    </div>
+                    <button
+                      onClick={() => setShowAddTheme(v => !v)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Theme
+                    </button>
+                  </div>
+
+                  {/* Add theme form */}
+                  {showAddTheme && (
+                    <div className="bg-gray-900 border border-gray-600 rounded-xl p-4 space-y-4">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">New Theme</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-gray-400 mb-1">Theme name</label>
+                          <input
+                            type="text"
+                            value={themeForm.name}
+                            onChange={e => setThemeForm(f => ({ ...f, name: e.target.value }))}
+                            placeholder="e.g. Ocean Blue"
+                            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Primary color</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={themeForm.primaryColor}
+                              onChange={e => setThemeForm(f => ({ ...f, primaryColor: e.target.value }))}
+                              className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5"
+                            />
+                            <span className="text-sm text-gray-300 font-mono">{themeForm.primaryColor}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Accent color</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={themeForm.accentColor}
+                              onChange={e => setThemeForm(f => ({ ...f, accentColor: e.target.value }))}
+                              className="w-9 h-9 rounded-lg border border-gray-600 bg-transparent cursor-pointer p-0.5"
+                            />
+                            <span className="text-sm text-gray-300 font-mono">{themeForm.accentColor}</span>
+                          </div>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-gray-400 mb-1">Lock to plan</label>
+                          <select
+                            value={themeForm.plan}
+                            onChange={e => setThemeForm(f => ({ ...f, plan: e.target.value }))}
+                            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-100 outline-none focus:ring-2 focus:ring-amber-500"
+                          >
+                            <option value="all">All Plans</option>
+                            <option value="grow">Grow+ only</option>
+                            <option value="enterprise">Enterprise only</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          onClick={() => { setShowAddTheme(false); setThemeForm({ name: '', primaryColor: '#6366f1', accentColor: '#8b5cf6', plan: 'all' }); }}
+                          className="px-3 py-1.5 text-sm font-medium rounded-lg text-gray-400 hover:text-gray-200 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={addTheme}
+                          disabled={!themeForm.name.trim() || !!busy.themes_add}
+                          className="px-4 py-1.5 text-sm font-medium rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-900 transition-colors"
+                        >
+                          {busy.themes_add ? 'Saving…' : 'Add Theme'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Theme list */}
+                  {themes.length === 0 ? (
+                    <div className="py-8 text-center text-gray-500 text-sm">
+                      No themes yet. Add one above.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-700 rounded-lg border border-gray-700 overflow-hidden">
+                      {themes.map(theme => (
+                        <div key={theme.id} className="flex items-center gap-4 px-4 py-3 bg-gray-800/50 hover:bg-gray-700/30">
+                          {/* Color swatches */}
+                          <div className="flex gap-1.5 flex-shrink-0">
+                            <div className="w-6 h-6 rounded-full border border-gray-600 shadow-sm" style={{ background: theme.primaryColor }} />
+                            <div className="w-6 h-6 rounded-full border border-gray-600 shadow-sm" style={{ background: theme.accentColor }} />
+                          </div>
+                          {/* Name + badges */}
+                          <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-gray-100 text-sm">{theme.name}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PLAN_BADGE[theme.plan] ?? PLAN_BADGE.all}`}>
+                              {PLAN_LABEL[theme.plan] ?? 'All Plans'}
+                            </span>
+                            {theme.builtIn && (
+                              <span className="text-xs text-gray-500">built-in</span>
+                            )}
+                          </div>
+                          {/* Delete */}
+                          {!theme.builtIn && (
+                            confirmDeleteThemeId === theme.id ? (
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className="text-xs text-gray-400">Delete?</span>
+                                <button
+                                  onClick={() => deleteTheme(theme.id)}
+                                  disabled={!!busy[`theme_del_${theme.id}`]}
+                                  className="px-2.5 py-1 text-xs font-semibold bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+                                >
+                                  {busy[`theme_del_${theme.id}`] ? '…' : 'Confirm'}
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteThemeId(null)}
+                                  className="px-2.5 py-1 text-xs font-semibold border border-gray-600 text-gray-400 hover:text-gray-200 rounded-lg transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmDeleteThemeId(theme.id)}
+                                className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors flex-shrink-0"
+                                title="Delete theme"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* ── Section 3: Feature Flags ──────────────────────────────── */}
                 <section className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-6">
                   <h2 className="text-amber-400 font-semibold text-sm uppercase tracking-wider">
                     Feature Flags

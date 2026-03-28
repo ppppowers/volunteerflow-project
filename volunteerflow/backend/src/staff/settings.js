@@ -33,13 +33,13 @@ function staffSettingsRouter(pool) {
         return res.status(400).json({ error: 'value is required' });
       }
       const result = await pool.query(
-        `UPDATE system_settings
+        `INSERT INTO system_settings (key, value, updated_by, updated_at)
+         VALUES ($3, $1::jsonb, $2, NOW())
+         ON CONFLICT (key) DO UPDATE
          SET value = $1::jsonb, updated_by = $2, updated_at = NOW()
-         WHERE key = $3
          RETURNING key`,
         [JSON.stringify(req.body.value), req.staff.id, key]
       );
-      if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });
       res.json({ success: true });
     } catch (err) {
       console.error('[staff/settings] PATCH error:', err.message);

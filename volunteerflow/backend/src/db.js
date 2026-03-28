@@ -927,6 +927,7 @@ async function initDb() {
       ['maintenance_mode', 'false'],
       ['maintenance_message', '"We are performing scheduled maintenance. We\'ll be back shortly."'],
       ['feature_flags', '{"volunteer_portal":true,"member_portal":true,"employee_portal":true,"training":true,"vetting":true,"hours_tracking":true,"badges":true,"file_library":true,"messaging":true,"login_notifications":true,"data_import":true,"audit_logs":true,"portal_designer":true,"signup_forms":true}'],
+      ['themes', '[{"id":"emerald","name":"Emerald","primaryColor":"#10b981","accentColor":"#0d9488","plan":"all","builtIn":true},{"id":"ocean","name":"Ocean Blue","primaryColor":"#3b82f6","accentColor":"#2563eb","plan":"all","builtIn":true},{"id":"violet","name":"Violet","primaryColor":"#8b5cf6","accentColor":"#7c3aed","plan":"grow","builtIn":true},{"id":"rose","name":"Rose","primaryColor":"#f43f5e","accentColor":"#e11d48","plan":"enterprise","builtIn":true},{"id":"amber","name":"Amber","primaryColor":"#f59e0b","accentColor":"#d97706","plan":"all","builtIn":true}]'],
     ];
     for (const [key, value] of systemSettingSeeds) {
       await client.query(
