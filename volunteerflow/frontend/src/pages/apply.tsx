@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { CheckCircle, ChevronLeft, Camera, X as XIcon } from 'lucide-react';
-import { signupFormConfigs, type FormField } from '@/lib/signupForms';
+import { getFormConfig, type FormField } from '@/lib/signupForms';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -187,16 +187,11 @@ export default function ApplyPage() {
   const accent = accentMap[type];
 
   // Load config from localStorage (falls back to module defaults)
-  const [config, setConfig] = useState(() => signupFormConfigs[type]);
+  const [config, setConfig] = useState(() => getFormConfig('master'));
 
   useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}');
-      setConfig(stored[type] ?? signupFormConfigs[type]);
-    } catch {
-      setConfig(signupFormConfigs[type]);
-    }
-  }, [type]);
+    setConfig(getFormConfig('master'));
+  }, []);
 
   const activeFields = useMemo(
     () => config.fields.filter((f) => f.enabled),

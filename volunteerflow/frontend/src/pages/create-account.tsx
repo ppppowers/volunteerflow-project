@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { Eye, EyeOff, Check, ArrowRight, Camera, X as XIcon } from 'lucide-react';
-import { signupFormConfigs, type FormField } from '@/lib/signupForms';
+import { getFormConfig, type FormField } from '@/lib/signupForms';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -10,12 +10,7 @@ const inputCls =
   'w-full px-3 py-2.5 text-sm border border-neutral-300 bg-white text-neutral-900 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none placeholder-neutral-400 transition-colors';
 
 function loadConfig() {
-  try {
-    const stored = JSON.parse(localStorage.getItem('vf_signup_form_configs') ?? '{}');
-    return stored.volunteer ?? signupFormConfigs.volunteer;
-  } catch {
-    return signupFormConfigs.volunteer;
-  }
+  return getFormConfig('master');
 }
 
 // ─── Image field ──────────────────────────────────────────────────────────────
@@ -106,7 +101,7 @@ export default function CreateAccountPage() {
   }, [router.isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load org-configured form fields
-  const [config, setConfig] = useState(() => signupFormConfigs.volunteer);
+  const [config, setConfig] = useState(() => getFormConfig('master'));
   useEffect(() => { setConfig(loadConfig()); }, []);
   const activeFields = useMemo(() => config.fields.filter((f) => f.enabled), [config]);
 
