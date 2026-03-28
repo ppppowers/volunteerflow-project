@@ -430,60 +430,6 @@ export default function VolunteerDetail() {
               </div>
             </Card>
 
-            {/* Contact */}
-            <Card className="p-6">
-              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Contact Information</h3>
-              <div className="space-y-4">
-                {([['email', Mail, 'Email', 'email'] as const, ['phone', Phone, 'Phone', 'tel'] as const, ['location', MapPin, 'Location', 'text'] as const]).map(([key, Icon, label, type]) => (
-                  <div key={key}>
-                    <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">{label}</label>
-                    {isEditing ? (
-                      <input type={type} value={formData[key]} onChange={e => setFormData({ ...formData, [key]: e.target.value })} className="w-full mt-1 px-3 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500" />
-                    ) : (
-                      <div className="flex items-center gap-2 mt-1 text-neutral-900 dark:text-neutral-100"><Icon className="w-4 h-4 text-primary-600 dark:text-primary-400" /><span className="truncate">{(volunteer as any)[key]}</span></div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Card>
-
-            {/* Stats */}
-            <Card className="p-6">
-              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Key Statistics</h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800">
-                  <div className="flex items-center gap-2"><Calendar className="w-5 h-5 text-primary-600 dark:text-primary-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Joined</span></div>
-                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{new Date(volunteer.joinDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-success-50 dark:bg-success-900/20 rounded-lg border border-success-200 dark:border-success-800">
-                  <div className="flex items-center gap-2"><Clock className="w-5 h-5 text-success-600 dark:text-success-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Service</span></div>
-                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{calculateTimeInService()}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-warning-50 dark:bg-warning-900/20 rounded-lg border border-warning-200 dark:border-warning-800">
-                  <div className="flex items-center gap-2"><Users className="w-5 h-5 text-warning-600 dark:text-warning-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Events</span></div>
-                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{volunteer.eventsCompleted}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800">
-                  <div className="flex items-center gap-2"><TrendingUp className="w-5 h-5 text-primary-600 dark:text-primary-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Hours</span></div>
-                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{volunteer.hoursContributed}</span>
-                </div>
-              </div>
-            </Card>
-
-            {/* Skills */}
-            <Card className="p-6">
-              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Skills & Expertise</h3>
-              {isEditing ? (
-                <textarea value={formData.skills} onChange={e => setFormData({ ...formData, skills: e.target.value })} placeholder="Enter skills separated by commas" className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500" rows={4} />
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {volunteer.skills.length > 0 ? volunteer.skills.map((skill, i) => (
-                    <span key={i} className="px-3 py-1.5 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-sm font-medium rounded-lg border border-primary-200 dark:border-primary-800">{skill}</span>
-                  )) : <p className="text-sm text-neutral-500 dark:text-neutral-400 italic">No skills listed</p>}
-                </div>
-              )}
-            </Card>
-
             {/* Org Tags */}
             <Card className="p-6">
               <div className="flex items-center justify-between mb-4">
@@ -565,6 +511,60 @@ export default function VolunteerDetail() {
                   <p className="text-sm text-neutral-400 dark:text-neutral-500 italic">No tags yet</p>
                 )}
               </div>
+            </Card>
+
+            {/* Contact */}
+            <Card className="p-6">
+              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Contact Information</h3>
+              <div className="space-y-4">
+                {([['email', Mail, 'Email', 'email'] as const, ['phone', Phone, 'Phone', 'tel'] as const, ['location', MapPin, 'Location', 'text'] as const]).map(([key, Icon, label, type]) => (
+                  <div key={key}>
+                    <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">{label}</label>
+                    {isEditing ? (
+                      <input type={type} value={formData[key]} onChange={e => setFormData({ ...formData, [key]: e.target.value })} className="w-full mt-1 px-3 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                    ) : (
+                      <div className="flex items-center gap-2 mt-1 text-neutral-900 dark:text-neutral-100"><Icon className="w-4 h-4 text-primary-600 dark:text-primary-400" /><span className="truncate">{(volunteer as any)[key]}</span></div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            {/* Stats */}
+            <Card className="p-6">
+              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Key Statistics</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800">
+                  <div className="flex items-center gap-2"><Calendar className="w-5 h-5 text-primary-600 dark:text-primary-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Joined</span></div>
+                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{new Date(volunteer.joinDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-success-50 dark:bg-success-900/20 rounded-lg border border-success-200 dark:border-success-800">
+                  <div className="flex items-center gap-2"><Clock className="w-5 h-5 text-success-600 dark:text-success-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Service</span></div>
+                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{calculateTimeInService()}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-warning-50 dark:bg-warning-900/20 rounded-lg border border-warning-200 dark:border-warning-800">
+                  <div className="flex items-center gap-2"><Users className="w-5 h-5 text-warning-600 dark:text-warning-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Events</span></div>
+                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{volunteer.eventsCompleted}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800">
+                  <div className="flex items-center gap-2"><TrendingUp className="w-5 h-5 text-primary-600 dark:text-primary-400" /><span className="text-sm text-neutral-700 dark:text-neutral-300">Hours</span></div>
+                  <span className="font-bold text-neutral-900 dark:text-neutral-100">{volunteer.hoursContributed}</span>
+                </div>
+              </div>
+            </Card>
+
+            {/* Skills */}
+            <Card className="p-6">
+              <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Skills & Expertise</h3>
+              {isEditing ? (
+                <textarea value={formData.skills} onChange={e => setFormData({ ...formData, skills: e.target.value })} placeholder="Enter skills separated by commas" className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500" rows={4} />
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {volunteer.skills.length > 0 ? volunteer.skills.map((skill, i) => (
+                    <span key={i} className="px-3 py-1.5 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-sm font-medium rounded-lg border border-primary-200 dark:border-primary-800">{skill}</span>
+                  )) : <p className="text-sm text-neutral-500 dark:text-neutral-400 italic">No skills listed</p>}
+                </div>
+              )}
             </Card>
 
             {volunteer.applicationId && (
