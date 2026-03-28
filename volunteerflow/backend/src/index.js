@@ -3298,7 +3298,7 @@ app.get('/api/portal/events', requireAuth, async (req, res) => {
        FROM events e
        WHERE e.org_id = $1
          AND e.status NOT IN ('DRAFT','CANCELLED')
-         AND (e.start_date IS NULL OR e.start_date >= NOW() - INTERVAL '1 day')
+         AND (e.start_date IS NULL OR e.start_date >= TO_CHAR(NOW() - INTERVAL '1 day', 'YYYY-MM-DD'))
        ORDER BY e.start_date ASC NULLS LAST`,
       [req.orgId]
     );
