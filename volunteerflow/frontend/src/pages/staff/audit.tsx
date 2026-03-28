@@ -1,6 +1,9 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StaffLayout } from '@/components/staff/StaffLayout';
 import { PermissionGate } from '@/components/staff/PermissionGate';
+import { staffApi } from '@/lib/staffApi';
+
+const STAFF_API_BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'}/staff`;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -239,20 +242,7 @@ export default function StaffAuditPage() {
       params.set('page', String(page));
       params.set('limit', '20');
 
-      const token = typeof window !== 'undefined' ? sessionStorage.getItem('vf_staff_token') : null;
-      const res = await fetch(`/api/staff/audit?${params}`, {
-        headers: { Authorization: `Bearer ${token ?? ''}` },
-      });
-      if (res.status === 401) {
-        sessionStorage.removeItem('vf_staff_token');
-        window.location.href = '/staff/login';
-        return;
-      }
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string }).error ?? 'Failed to load audit logs');
-      }
-      const json = (await res.json()) as AuditResponse;
+      const json = await staffApi.get(`/audit?${params}`) as AuditResponse;
       setData(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load audit logs');
@@ -279,7 +269,7 @@ export default function StaffAuditPage() {
       if (debouncedQ) params.set('q', debouncedQ);
 
       const token = typeof window !== 'undefined' ? sessionStorage.getItem('vf_staff_token') : null;
-      const res = await fetch(`/api/staff/audit/export?${params}`, {
+      const res = await fetch(`${STAFF_API_BASE}/audit/export?${params}`, {
         headers: { Authorization: `Bearer ${token ?? ''}` },
       });
       if (!res.ok) throw new Error('Export failed');
