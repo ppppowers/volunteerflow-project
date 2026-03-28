@@ -271,6 +271,11 @@ function QuestionRow({
   onUpdate,
   onDelete,
   onMove,
+  isDragging,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
 }: {
   question: Question;
   index: number;
@@ -278,6 +283,11 @@ function QuestionRow({
   onUpdate: (q: Question) => void;
   onDelete: () => void;
   onMove: (dir: 'up' | 'down') => void;
+  isDragging: boolean;
+  isDragOver: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
 }) {
   const meta = QUESTION_TYPES.find((qt) => qt.type === question.type)!;
   const IconComp = meta.icon;
@@ -304,7 +314,20 @@ function QuestionRow({
   };
 
   return (
-    <div className="group relative border border-neutral-200 dark:border-neutral-700 rounded-lg p-4 bg-white dark:bg-neutral-800 transition-shadow hover:shadow-md">
+    <div
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; onDragOver(e); }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      onDragEnd={() => onDrop()}
+      className={`group relative border rounded-lg p-4 bg-white dark:bg-neutral-800 transition-all select-none ${
+        isDragging ? 'opacity-40 scale-[0.98]' : 'opacity-100'
+      } ${
+        isDragOver && !isDragging
+          ? 'border-primary-400 dark:border-primary-500 shadow-md ring-2 ring-primary-200 dark:ring-primary-800'
+          : 'border-neutral-200 dark:border-neutral-700 hover:shadow-md'
+      }`}
+    >
       {/* Drag handle & reorder */}
       <div className="absolute -left-0 top-0 bottom-0 w-8 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
@@ -315,7 +338,9 @@ function QuestionRow({
         >
           <ChevronUp className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
         </button>
-        <GripVertical className="w-4 h-4 text-neutral-400" />
+        <span title="Drag to reorder" className="cursor-grab active:cursor-grabbing">
+          <GripVertical className="w-4 h-4 text-neutral-400" />
+        </span>
         <button
           onClick={() => onMove('down')}
           disabled={index === total - 1}
@@ -472,6 +497,8 @@ export default function Applications() {
   // Builder state
   const [editingTemplate, setEditingTemplate] = useState<ApplicationTemplate | null>(null);
   const [showQuestionPicker, setShowQuestionPicker] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   // Submissions filter state
   const [selectedTemplate, setSelectedTemplate] = useState<string>('all');
@@ -695,6 +722,19 @@ export default function Applications() {
       const idx = qs.findIndex((q) => q.id === qId);
       if (dir === 'up' && idx > 0) [qs[idx - 1], qs[idx]] = [qs[idx], qs[idx - 1]];
       if (dir === 'down' && idx < qs.length - 1) [qs[idx], qs[idx + 1]] = [qs[idx + 1], qs[idx]];
+      return { ...prev, questions: qs };
+    });
+  };
+
+  const reorderQuestion = (fromId: string, toId: string) => {
+    setEditingTemplate((prev) => {
+      if (!prev) return prev;
+      const qs = [...prev.questions];
+      const fromIdx = qs.findIndex((q) => q.id === fromId);
+      const toIdx   = qs.findIndex((q) => q.id === toId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
+      const [moved] = qs.splice(fromIdx, 1);
+      qs.splice(toIdx, 0, moved);
       return { ...prev, questions: qs };
     });
   };
@@ -1118,6 +1158,15 @@ export default function Applications() {
               onUpdate={(updated) => updateQuestion(q.id, updated)}
               onDelete={() => deleteQuestion(q.id)}
               onMove={(dir) => moveQuestion(q.id, dir)}
+              isDragging={dragId === q.id}
+              isDragOver={dragOverId === q.id}
+              onDragStart={() => setDragId(q.id)}
+              onDragOver={() => setDragOverId(q.id)}
+              onDrop={() => {
+                if (dragId && dragId !== q.id) reorderQuestion(dragId, q.id);
+                setDragId(null);
+                setDragOverId(null);
+              }}
             />
           ))}
 

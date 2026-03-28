@@ -55,15 +55,34 @@ interface PortalEvent {
   shifts: EventShift[];
 }
 
+interface QuizQuestion {
+  id: string;
+  type: 'multiple-choice' | 'true-false' | 'short-answer';
+  question: string;
+  options?: string[];
+  required: boolean;
+}
+
+interface FormField {
+  id: string;
+  type: 'text' | 'textarea' | 'select' | 'checkbox' | 'date';
+  label: string;
+  placeholder?: string;
+  options?: string[];
+  required: boolean;
+}
+
 interface TrainingSection {
   id: string;
   title: string;
-  type: 'text' | 'video' | 'file';
+  type: 'text' | 'video' | 'file' | 'quiz' | 'form';
   content?: string;
   videoUrl?: string;
   videoCaption?: string;
   filePrompt?: string;
   fileTypes?: string;
+  questions?: QuizQuestion[];
+  fields?: FormField[];
   required: boolean;
 }
 
@@ -1043,6 +1062,27 @@ function CourseViewer({
   const [idx, setIdx] = useState(0);
   const [completing, setCompleting] = useState(false);
   const [completedSections, setCompletedSections] = useState<Set<string>>(new Set(course.completedSections));
+  // answers keyed by `${sectionId}:${itemId}` — persists across section navigation within the session
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
+
+  const setAnswer = (sectionId: string, itemId: string, value: string | boolean) =>
+    setAnswers(prev => ({ ...prev, [`${sectionId}:${itemId}`]: value }));
+
+  const canSubmitSection = (s: TrainingSection): boolean => {
+    if (s.type === 'quiz') {
+      return (s.questions ?? []).filter(q => q.required).every(q => {
+        const v = answers[`${s.id}:${q.id}`];
+        return typeof v === 'string' && v.trim().length > 0;
+      });
+    }
+    if (s.type === 'form') {
+      return (s.fields ?? []).filter(f => f.required).every(f => {
+        const v = answers[`${s.id}:${f.id}`];
+        return f.type === 'checkbox' ? v === true : (typeof v === 'string' && v.trim().length > 0);
+      });
+    }
+    return true;
+  };
 
   const sections = course.sections;
   const section = sections[idx] ?? null;
@@ -1154,6 +1194,104 @@ function CourseViewer({
             )}
           </div>
         )}
+
+        {section.type === 'quiz' && (
+          <div className="space-y-5">
+            {(section.questions ?? []).length === 0 && (
+              <p className="text-sm text-neutral-400 italic">No questions in this section.</p>
+            )}
+            {(section.questions ?? []).map((q, qi) => {
+              const key = `${section.id}:${q.id}`;
+              const val = answers[key] as string | undefined;
+              return (
+                <div key={q.id} className="space-y-2">
+                  <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                    {qi + 1}. {q.question}
+                    {q.required && <span className="text-danger-500 ml-0.5">*</span>}
+                  </p>
+                  {(q.type === 'multiple-choice') && (
+                    <div className="space-y-1.5 pl-2">
+                      {(q.options ?? []).map((opt, oi) => (
+                        <label key={oi} className="flex items-center gap-2.5 cursor-pointer group">
+                          <input
+                            type="radio" name={key} value={opt} checked={val === opt}
+                            onChange={() => setAnswer(section.id, q.id, opt)}
+                            className="text-primary-600 focus:ring-primary-500"
+                          />
+                          <span className="text-sm text-neutral-700 dark:text-neutral-300 group-hover:text-neutral-900 dark:group-hover:text-neutral-100">{opt || `Option ${oi + 1}`}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {q.type === 'true-false' && (
+                    <div className="flex gap-4 pl-2">
+                      {['True', 'False'].map(opt => (
+                        <label key={opt} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio" name={key} value={opt} checked={val === opt}
+                            onChange={() => setAnswer(section.id, q.id, opt)}
+                            className="text-primary-600 focus:ring-primary-500"
+                          />
+                          <span className="text-sm text-neutral-700 dark:text-neutral-300">{opt}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {q.type === 'short-answer' && (
+                    <input
+                      type="text" value={val ?? ''}
+                      onChange={e => setAnswer(section.id, q.id, e.target.value)}
+                      placeholder="Your answer..."
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {section.type === 'form' && (
+          <div className="space-y-4">
+            {(section.fields ?? []).length === 0 && (
+              <p className="text-sm text-neutral-400 italic">No fields in this section.</p>
+            )}
+            {(section.fields ?? []).map((f) => {
+              const key = `${section.id}:${f.id}`;
+              const val = answers[key];
+              const ic = 'w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500';
+              return (
+                <div key={f.id} className="space-y-1">
+                  <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                    {f.label || 'Untitled field'}
+                    {f.required && <span className="text-danger-500 ml-0.5">*</span>}
+                  </label>
+                  {f.type === 'text' && (
+                    <input type="text" value={(val as string) ?? ''} onChange={e => setAnswer(section.id, f.id, e.target.value)} placeholder={f.placeholder ?? ''} className={ic} />
+                  )}
+                  {f.type === 'textarea' && (
+                    <textarea value={(val as string) ?? ''} onChange={e => setAnswer(section.id, f.id, e.target.value)} placeholder={f.placeholder ?? ''} rows={3} className={ic + ' resize-none'} />
+                  )}
+                  {f.type === 'select' && (
+                    <select value={(val as string) ?? ''} onChange={e => setAnswer(section.id, f.id, e.target.value)} className={ic}>
+                      <option value="">Select…</option>
+                      {(f.options ?? []).map((opt, oi) => <option key={oi} value={opt}>{opt}</option>)}
+                    </select>
+                  )}
+                  {f.type === 'date' && (
+                    <input type="date" value={(val as string) ?? ''} onChange={e => setAnswer(section.id, f.id, e.target.value)} className={ic} />
+                  )}
+                  {f.type === 'checkbox' && (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={(val as boolean) ?? false} onChange={e => setAnswer(section.id, f.id, e.target.checked)} className="rounded text-primary-600 focus:ring-primary-500" />
+                      <span className="text-sm text-neutral-600 dark:text-neutral-400">{f.placeholder || 'Check to confirm'}</span>
+                    </label>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Navigation */}
@@ -1195,13 +1333,14 @@ function CourseViewer({
         ) : (
           <button
             onClick={async () => {
+              if (!canSubmitSection(section)) return;
               await markSection(section.id);
               if (!isLast) setIdx(i => i + 1);
             }}
-            disabled={completing}
+            disabled={completing || !canSubmitSection(section)}
             className="flex-1 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
           >
-            {completing ? 'Saving…' : isLast ? 'Mark Complete' : 'Mark Complete & Next →'}
+            {completing ? 'Saving…' : section.type === 'quiz' ? (isLast ? 'Submit Answers' : 'Submit & Next →') : section.type === 'form' ? (isLast ? 'Submit Form' : 'Submit & Next →') : isLast ? 'Mark Complete' : 'Mark Complete & Next →'}
           </button>
         )}
       </div>

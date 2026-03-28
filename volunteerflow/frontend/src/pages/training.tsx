@@ -10,13 +10,30 @@ import {
   PlayCircle, FileUp, AlignLeft, ChevronUp, ChevronDown,
   Eye, EyeOff, Clock, Users, BookOpen, Award,
   Search, Filter, CheckCircle2, ArrowLeft, ExternalLink,
-  AlertCircle, UploadCloud, Layers,
+  AlertCircle, UploadCloud, Layers, HelpCircle, ClipboardList,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type SectionType = 'text' | 'video' | 'file';
+type SectionType = 'text' | 'video' | 'file' | 'quiz' | 'form';
 type PageTab = 'courses' | 'modules' | 'progress';
+
+interface QuizQuestion {
+  id: string;
+  type: 'multiple-choice' | 'true-false' | 'short-answer';
+  question: string;
+  options?: string[];
+  required: boolean;
+}
+
+interface FormField {
+  id: string;
+  type: 'text' | 'textarea' | 'select' | 'checkbox' | 'date';
+  label: string;
+  placeholder?: string;
+  options?: string[];
+  required: boolean;
+}
 
 interface TrainingSection {
   id: string;
@@ -30,6 +47,10 @@ interface TrainingSection {
   // file submission
   filePrompt?: string;
   fileTypes?: string;
+  // quiz
+  questions?: QuizQuestion[];
+  // form
+  fields?: FormField[];
   required: boolean;
 }
 
@@ -253,9 +274,11 @@ function SectionEditor({
   const ic = 'w-full px-3 py-2 text-sm border border-neutral-200 dark:border-neutral-600 rounded-lg bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500';
 
   const TYPE_OPTIONS: { value: SectionType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { value: 'text', label: 'Text / Instructions', icon: AlignLeft },
-    { value: 'video', label: 'Video', icon: PlayCircle },
-    { value: 'file', label: 'File Submission', icon: FileUp },
+    { value: 'text',  label: 'Text / Instructions', icon: AlignLeft },
+    { value: 'video', label: 'Video',               icon: PlayCircle },
+    { value: 'file',  label: 'File Submission',     icon: FileUp },
+    { value: 'quiz',  label: 'Quiz / Questions',    icon: HelpCircle },
+    { value: 'form',  label: 'Fillable Form',       icon: ClipboardList },
   ];
 
   return (
@@ -362,6 +385,177 @@ function SectionEditor({
               placeholder="Accepted file types, e.g. PDF, JPG, PNG (optional)..."
               className={ic}
             />
+          </div>
+        )}
+
+        {section.type === 'quiz' && (
+          <div className="space-y-3">
+            {(section.questions ?? []).length === 0 && (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500 italic">No questions yet — add one below.</p>
+            )}
+            {(section.questions ?? []).map((q, qi) => {
+              const updateQ = (patch: Partial<QuizQuestion>) =>
+                onChange({ ...section, questions: (section.questions ?? []).map(qq => qq.id === q.id ? { ...qq, ...patch } : qq) });
+              return (
+                <div key={q.id} className="border border-neutral-200 dark:border-neutral-600 rounded-lg p-3 space-y-2 bg-neutral-50 dark:bg-neutral-700/40">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-neutral-400 w-4 flex-shrink-0">{qi + 1}</span>
+                    <input
+                      value={q.question}
+                      onChange={e => updateQ({ question: e.target.value })}
+                      placeholder="Question text..."
+                      className={ic + ' flex-1 !text-sm'}
+                    />
+                    <select
+                      value={q.type}
+                      onChange={e => {
+                        const t = e.target.value as QuizQuestion['type'];
+                        updateQ({ type: t, options: t === 'multiple-choice' ? ['', ''] : undefined });
+                      }}
+                      className={ic + ' !w-auto !py-1.5 !text-xs'}
+                    >
+                      <option value="multiple-choice">Multiple choice</option>
+                      <option value="true-false">True / False</option>
+                      <option value="short-answer">Short answer</option>
+                    </select>
+                    <label className="flex items-center gap-1 text-xs text-neutral-500 cursor-pointer flex-shrink-0">
+                      <input type="checkbox" checked={q.required} onChange={e => updateQ({ required: e.target.checked })} className="rounded" />
+                      Req.
+                    </label>
+                    <button onClick={() => onChange({ ...section, questions: (section.questions ?? []).filter(qq => qq.id !== q.id) })} className="p-1 text-neutral-400 hover:text-danger-500 transition-colors flex-shrink-0">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {q.type === 'multiple-choice' && (
+                    <div className="pl-6 space-y-1.5">
+                      {(q.options ?? []).map((opt, oi) => (
+                        <div key={oi} className="flex items-center gap-2">
+                          <span className="w-3.5 h-3.5 rounded-full border-2 border-neutral-300 dark:border-neutral-500 flex-shrink-0" />
+                          <input
+                            value={opt}
+                            onChange={e => {
+                              const opts = [...(q.options ?? [])];
+                              opts[oi] = e.target.value;
+                              updateQ({ options: opts });
+                            }}
+                            placeholder={`Option ${oi + 1}`}
+                            className={ic + ' !py-1 !text-xs flex-1'}
+                          />
+                          <button onClick={() => updateQ({ options: (q.options ?? []).filter((_, i) => i !== oi) })} className="p-0.5 text-neutral-300 hover:text-danger-400 flex-shrink-0">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                      <button onClick={() => updateQ({ options: [...(q.options ?? []), ''] })} className="text-xs text-primary-600 dark:text-primary-400 hover:underline pl-5 flex items-center gap-1">
+                        <Plus className="w-3 h-3" /> Add option
+                      </button>
+                    </div>
+                  )}
+
+                  {q.type === 'true-false' && (
+                    <div className="pl-6 flex gap-4 text-xs text-neutral-400 dark:text-neutral-500">
+                      <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded-full border-2 border-neutral-300 dark:border-neutral-500" /> True</span>
+                      <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded-full border-2 border-neutral-300 dark:border-neutral-500" /> False</span>
+                    </div>
+                  )}
+
+                  {q.type === 'short-answer' && (
+                    <div className="pl-6">
+                      <div className="h-7 bg-white dark:bg-neutral-700 border border-dashed border-neutral-300 dark:border-neutral-500 rounded text-xs text-neutral-400 px-2 flex items-center">Volunteer types their answer here…</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              onClick={() => onChange({ ...section, questions: [...(section.questions ?? []), { id: uid(), type: 'multiple-choice', question: '', options: ['', ''], required: false }] })}
+              className="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add question
+            </button>
+          </div>
+        )}
+
+        {section.type === 'form' && (
+          <div className="space-y-3">
+            {(section.fields ?? []).length === 0 && (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500 italic">No fields yet — add one below.</p>
+            )}
+            {(section.fields ?? []).map((f) => {
+              const updateF = (patch: Partial<FormField>) =>
+                onChange({ ...section, fields: (section.fields ?? []).map(ff => ff.id === f.id ? { ...ff, ...patch } : ff) });
+              return (
+                <div key={f.id} className="border border-neutral-200 dark:border-neutral-600 rounded-lg p-3 space-y-2 bg-neutral-50 dark:bg-neutral-700/40">
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={f.label}
+                      onChange={e => updateF({ label: e.target.value })}
+                      placeholder="Field label..."
+                      className={ic + ' flex-1 !text-sm'}
+                    />
+                    <select
+                      value={f.type}
+                      onChange={e => updateF({ type: e.target.value as FormField['type'], options: e.target.value === 'select' ? [''] : undefined })}
+                      className={ic + ' !w-auto !py-1.5 !text-xs'}
+                    >
+                      <option value="text">Short text</option>
+                      <option value="textarea">Long text</option>
+                      <option value="select">Dropdown</option>
+                      <option value="checkbox">Checkbox</option>
+                      <option value="date">Date</option>
+                    </select>
+                    <label className="flex items-center gap-1 text-xs text-neutral-500 cursor-pointer flex-shrink-0">
+                      <input type="checkbox" checked={f.required} onChange={e => updateF({ required: e.target.checked })} className="rounded" />
+                      Req.
+                    </label>
+                    <button onClick={() => onChange({ ...section, fields: (section.fields ?? []).filter(ff => ff.id !== f.id) })} className="p-1 text-neutral-400 hover:text-danger-500 transition-colors flex-shrink-0">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {(f.type === 'text' || f.type === 'textarea') && (
+                    <input
+                      value={f.placeholder ?? ''}
+                      onChange={e => updateF({ placeholder: e.target.value })}
+                      placeholder="Placeholder text (optional)..."
+                      className={ic + ' !text-xs !py-1.5'}
+                    />
+                  )}
+
+                  {f.type === 'select' && (
+                    <div className="space-y-1.5">
+                      {(f.options ?? []).map((opt, oi) => (
+                        <div key={oi} className="flex items-center gap-2">
+                          <input
+                            value={opt}
+                            onChange={e => {
+                              const opts = [...(f.options ?? [])];
+                              opts[oi] = e.target.value;
+                              updateF({ options: opts });
+                            }}
+                            placeholder={`Option ${oi + 1}`}
+                            className={ic + ' !py-1 !text-xs flex-1'}
+                          />
+                          <button onClick={() => updateF({ options: (f.options ?? []).filter((_, i) => i !== oi) })} className="p-0.5 text-neutral-300 hover:text-danger-400 flex-shrink-0">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                      <button onClick={() => updateF({ options: [...(f.options ?? []), ''] })} className="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1">
+                        <Plus className="w-3 h-3" /> Add option
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              onClick={() => onChange({ ...section, fields: [...(section.fields ?? []), { id: uid(), type: 'text', label: '', required: false }] })}
+              className="flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add field
+            </button>
           </div>
         )}
       </div>
@@ -523,11 +717,13 @@ function CourseBuilderModal({
               ))}
 
               {/* Add section buttons */}
-              <div className="flex gap-2 pt-2">
+              <div className="flex flex-wrap gap-2 pt-2">
                 {([
-                  { type: 'text' as const, label: 'Text', icon: AlignLeft },
-                  { type: 'video' as const, label: 'Video', icon: PlayCircle },
-                  { type: 'file' as const, label: 'File Submission', icon: FileUp },
+                  { type: 'text' as const,  label: 'Text',          icon: AlignLeft },
+                  { type: 'video' as const, label: 'Video',         icon: PlayCircle },
+                  { type: 'file' as const,  label: 'File Upload',   icon: FileUp },
+                  { type: 'quiz' as const,  label: 'Quiz',          icon: HelpCircle },
+                  { type: 'form' as const,  label: 'Fillable Form', icon: ClipboardList },
                 ]).map(({ type, label, icon: Icon }) => (
                   <button
                     key={type}
