@@ -1,6 +1,5 @@
 ﻿import React, { useState } from 'react';
 import { useRouter } from 'next/router';
-import { staffApi } from '../../lib/staffApi';
 
 export default function StaffLogin() {
   const [email, setEmail] = useState('');
@@ -13,7 +12,14 @@ export default function StaffLogin() {
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const res = await staffApi.post('/auth/login', { email, password }) as any;
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+      const raw = await fetch(`${baseUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const res = await raw.json();
+      if (!raw.ok) throw new Error(res?.error ?? 'Login failed');
       sessionStorage.setItem('vf_staff_token', res.token);
       sessionStorage.setItem('vf_staff_user', JSON.stringify(res.user));
       router.replace('/staff');
@@ -34,11 +40,13 @@ export default function StaffLogin() {
         {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
+            id="email" name="email"
             type="email" placeholder="Staff email" value={email}
             onChange={e => setEmail(e.target.value)} required
             className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-amber-500"
           />
           <input
+            id="password" name="password"
             type="password" placeholder="Password" value={password}
             onChange={e => setPassword(e.target.value)} required
             className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-amber-500"

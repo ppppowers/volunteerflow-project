@@ -318,6 +318,7 @@ function mapApplication(r) {
     id: r.id,
     volunteerId: r.volunteer_id,
     eventId: r.event_id,
+    shiftId: r.shift_id ?? null,
     message: r.message,
     status: r.status,
     vettingStage: r.vetting_stage ?? 'applied',
@@ -1378,9 +1379,10 @@ app.get('/api/events', requireAuth, async (req, res) => {
       [...params, limit, (page - 1) * limit]
     );
 
+    const events = await withShiftCounts(dataRes.rows, req.orgId);
     res.json({
       success: true,
-      data: dataRes.rows.map(mapEvent),
+      data: events,
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (err) {
@@ -1399,7 +1401,7 @@ app.get('/api/events/:id', requireAuth, async (req, res) => {
       [req.params.id, req.orgId]
     );
 
-    const event = mapEvent(rows[0]);
+    const [event] = await withShiftCounts(rows, req.orgId);
     event.applications = appRows.rows.map(mapApplication);
     event.stats = {
       participantCount: event.participantCount,
@@ -3455,6 +3457,125 @@ app.delete('/api/portal/signup/:eventId', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('DELETE /api/portal/signup error:', err.message);
     res.status(500).json({ success: false, error: 'Failed to cancel signup' });
+  }
+});
+
+// ── Volunteer Portal — Training ───────────────────────────────────────────────
+
+app.get('/api/portal/training', requireAuth, async (req, res) => {
+  try {
+    const { rows: volRows } = await pool.query(
+      'SELECT id, first_name, last_name FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!volRows.length) return res.json({ success: true, data: [] });
+    const volId = volRows[0].id;
+
+    // Assignments for this volunteer
+    const { rows: assignRows } = await pool.query(
+      'SELECT course_id, due_date FROM training_assignments WHERE person_id = $1 AND org_id = $2',
+      [volId, req.orgId]
+    );
+    const assignedIds = new Set(assignRows.map(r => r.course_id));
+    const dueDates = Object.fromEntries(assignRows.map(r => [r.course_id, r.due_date ?? null]));
+
+    // Published courses — all of them if no assignments, otherwise only assigned ones
+    const { rows: courseRows } = await pool.query(
+      'SELECT * FROM training_courses WHERE org_id = $1 AND published = true ORDER BY created_at ASC',
+      [req.orgId]
+    );
+    const visibleCourses = assignedIds.size > 0
+      ? courseRows.filter(c => assignedIds.has(c.id))
+      : courseRows;
+
+    if (!visibleCourses.length) return res.json({ success: true, data: [] });
+
+    // Section progress for this volunteer
+    const courseIds = visibleCourses.map(c => c.id);
+    const { rows: progressRows } = await pool.query(
+      'SELECT course_id, section_id FROM training_section_progress WHERE volunteer_id = $1 AND org_id = $2 AND course_id = ANY($3)',
+      [volId, req.orgId, courseIds]
+    );
+    const progressMap = {};
+    for (const r of progressRows) {
+      if (!progressMap[r.course_id]) progressMap[r.course_id] = [];
+      progressMap[r.course_id].push(r.section_id);
+    }
+
+    // Completions
+    const { rows: compRows } = await pool.query(
+      'SELECT course_id FROM training_completions WHERE volunteer_id = $1 AND org_id = $2 AND course_id = ANY($3)',
+      [volId, req.orgId, courseIds]
+    );
+    const completedIds = new Set(compRows.map(r => r.course_id));
+
+    const data = visibleCourses.map(c => ({
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      category: c.category,
+      color: c.color,
+      estimatedMinutes: c.estimated_minutes,
+      sections: c.sections ?? [],
+      dueDate: dueDates[c.id] ?? null,
+      completedSections: progressMap[c.id] ?? [],
+      completed: completedIds.has(c.id),
+    }));
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('GET /api/portal/training error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch training' });
+  }
+});
+
+app.post('/api/portal/training/progress', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { courseId, sectionId } = req.body;
+    if (!courseId || !sectionId) return res.status(400).json({ success: false, error: 'courseId and sectionId required' });
+    const { rows: volRows } = await pool.query(
+      'SELECT id FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!volRows.length) return res.status(404).json({ success: false, error: 'Volunteer not found' });
+    const id = generateId();
+    await pool.query(
+      `INSERT INTO training_section_progress (id, org_id, course_id, volunteer_id, section_id)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (course_id, volunteer_id, section_id) DO NOTHING`,
+      [id, req.orgId, courseId, volRows[0].id, sectionId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /api/portal/training/progress error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to save progress' });
+  }
+});
+
+app.post('/api/portal/training/complete', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const { courseId } = req.body;
+    if (!courseId) return res.status(400).json({ success: false, error: 'courseId required' });
+    const { rows: volRows } = await pool.query(
+      'SELECT id, first_name, last_name FROM volunteers WHERE email = $1 AND org_id = $2 LIMIT 1',
+      [req.user.email, req.orgId]
+    );
+    if (!volRows.length) return res.status(404).json({ success: false, error: 'Volunteer not found' });
+    const vol = volRows[0];
+    const existing = await pool.query(
+      'SELECT id FROM training_completions WHERE course_id = $1 AND volunteer_id = $2',
+      [courseId, vol.id]
+    );
+    if (!existing.rows.length) {
+      const id = generateId();
+      await pool.query(
+        `INSERT INTO training_completions (id, org_id, course_id, volunteer_id, volunteer_name, completed_at)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [id, req.orgId, courseId, vol.id, `${vol.first_name} ${vol.last_name}`.trim(), new Date().toISOString().slice(0, 10)]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /api/portal/training/complete error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to record completion' });
   }
 });
 

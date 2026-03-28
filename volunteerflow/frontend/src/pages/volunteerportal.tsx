@@ -55,6 +55,30 @@ interface PortalEvent {
   shifts: EventShift[];
 }
 
+interface TrainingSection {
+  id: string;
+  title: string;
+  type: 'text' | 'video' | 'file';
+  content?: string;
+  videoUrl?: string;
+  videoCaption?: string;
+  filePrompt?: string;
+  required: boolean;
+}
+
+interface PortalCourse {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  color: string;
+  estimatedMinutes: number;
+  sections: TrainingSection[];
+  dueDate: string | null;
+  completedSections: string[];
+  completed: boolean;
+}
+
 interface PortalSignup {
   id: string;
   event_id: string;
@@ -375,13 +399,14 @@ function TopBar({ profile, onLogout }: { profile: VolunteerProfile; onLogout: ()
 
 // ─── Bottom Nav ───────────────────────────────────────────────────────────────
 
-type Tab = 'home' | 'events' | 'myevents' | 'profile';
+type Tab = 'home' | 'events' | 'myevents' | 'training' | 'profile';
 
-function BottomNav({ tab, setTab, myCount }: { tab: Tab; setTab: (t: Tab) => void; myCount: number }) {
+function BottomNav({ tab, setTab, myCount, trainingCount }: { tab: Tab; setTab: (t: Tab) => void; myCount: number; trainingCount: number }) {
   const items: { id: Tab; emoji: string; label: string }[] = [
     { id: 'home',     emoji: '🏠', label: 'Home'      },
     { id: 'events',   emoji: '📅', label: 'Sign Up'   },
     { id: 'myevents', emoji: '✅', label: 'My Events' },
+    { id: 'training', emoji: '🎓', label: 'Training'  },
     { id: 'profile',  emoji: '👤', label: 'Profile'   },
   ];
   return (
@@ -396,6 +421,9 @@ function BottomNav({ tab, setTab, myCount }: { tab: Tab; setTab: (t: Tab) => voi
             {item.emoji}
             {item.id === 'myevents' && myCount > 0 && tab !== 'myevents' && (
               <span className="absolute -top-1 -right-1.5 min-w-[14px] h-[14px] bg-danger-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5">{myCount}</span>
+            )}
+            {item.id === 'training' && trainingCount > 0 && tab !== 'training' && (
+              <span className="absolute -top-1 -right-1.5 min-w-[14px] h-[14px] bg-primary-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5">{trainingCount}</span>
             )}
           </span>
           <span className="text-[10.5px] font-semibold">{item.label}</span>
@@ -990,6 +1018,309 @@ function MyEventsTab({
   );
 }
 
+// ─── Training Tab ─────────────────────────────────────────────────────────────
+
+function embedUrl(url: string): string | null {
+  if (!url) return null;
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+  const vm = url.match(/vimeo\.com\/(\d+)/);
+  if (vm) return `https://player.vimeo.com/video/${vm[1]}`;
+  if (/\.(mp4|webm|ogg)$/i.test(url)) return url; // direct video
+  return null;
+}
+
+function CourseViewer({
+  course, onBack, onSectionComplete, onCourseComplete, showToast,
+}: {
+  course: PortalCourse;
+  onBack: () => void;
+  onSectionComplete: (courseId: string, sectionId: string) => Promise<void>;
+  onCourseComplete: (courseId: string) => Promise<void>;
+  showToast: (msg: string) => void;
+}) {
+  const [idx, setIdx] = useState(0);
+  const [completing, setCompleting] = useState(false);
+  const [completedSections, setCompletedSections] = useState<Set<string>>(new Set(course.completedSections));
+
+  const sections = course.sections;
+  const section = sections[idx] ?? null;
+  const isLast = idx === sections.length - 1;
+  const allRequiredDone = sections
+    .filter(s => s.required)
+    .every(s => completedSections.has(s.id));
+
+  const markSection = async (sectionId: string) => {
+    if (completedSections.has(sectionId)) return;
+    setCompleting(true);
+    try {
+      await portalApi.post('/portal/training/progress', { courseId: course.id, sectionId });
+      setCompletedSections(prev => new Set([...prev, sectionId]));
+    } catch {
+      showToast('❌ Could not save progress');
+    } finally {
+      setCompleting(false);
+    }
+  };
+
+  const completeCourse = async () => {
+    setCompleting(true);
+    try {
+      await portalApi.post('/portal/training/complete', { courseId: course.id });
+      await onCourseComplete(course.id);
+      showToast('🎉 Course completed!');
+      onBack();
+    } catch {
+      showToast('❌ Could not record completion');
+    } finally {
+      setCompleting(false);
+    }
+  };
+
+  const progressPct = sections.length > 0
+    ? Math.round((completedSections.size / sections.length) * 100)
+    : 0;
+
+  if (!section) return (
+    <div className="text-center py-16">
+      <p className="text-neutral-500 dark:text-neutral-400 text-sm">This course has no content yet.</p>
+      <button onClick={onBack} className="mt-4 text-sm text-primary-600 dark:text-primary-400 font-semibold">← Back</button>
+    </div>
+  );
+
+  const embed = section.type === 'video' ? embedUrl(section.videoUrl ?? '') : null;
+  const isDone = completedSections.has(section.id);
+
+  return (
+    <div>
+      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 mb-4 transition-colors">
+        ← Back to training
+      </button>
+
+      {/* Course header */}
+      <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-4 mb-4 shadow-sm">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="w-3 h-3 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: course.color }} />
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-sm text-neutral-900 dark:text-neutral-100">{course.title}</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+              Section {idx + 1} of {sections.length}
+            </p>
+          </div>
+        </div>
+        <div className="h-1.5 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
+          <div className="h-full bg-primary-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+        </div>
+        <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">{progressPct}% complete</p>
+      </div>
+
+      {/* Section content */}
+      <div className="bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl p-5 mb-4 shadow-sm">
+        <h3 className="font-semibold text-base text-neutral-900 dark:text-neutral-100 mb-3">{section.title}</h3>
+
+        {section.type === 'text' && section.content && (
+          <div className="text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed whitespace-pre-wrap">
+            {section.content}
+          </div>
+        )}
+
+        {section.type === 'video' && (
+          embed ? (
+            /\.(mp4|webm|ogg)$/i.test(embed) ? (
+              <video src={embed} controls className="w-full rounded-lg mb-2" />
+            ) : (
+              <div className="aspect-video rounded-lg overflow-hidden mb-2">
+                <iframe src={embed} className="w-full h-full" allowFullScreen title={section.title} />
+              </div>
+            )
+          ) : (
+            <div className="bg-neutral-100 dark:bg-neutral-700 rounded-lg p-4 text-sm text-neutral-500 dark:text-neutral-400 text-center">
+              Video unavailable — invalid URL
+            </div>
+          )
+        )}
+        {section.type === 'video' && section.videoCaption && (
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1">{section.videoCaption}</p>
+        )}
+
+        {section.type === 'file' && (
+          <div className="bg-neutral-50 dark:bg-neutral-700/50 border border-dashed border-neutral-300 dark:border-neutral-600 rounded-lg p-4 text-center">
+            <p className="text-sm text-neutral-700 dark:text-neutral-300 mb-1 font-medium">
+              {section.filePrompt || 'Upload the required file to complete this section.'}
+            </p>
+            {section.fileTypes && (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">Accepted: {section.fileTypes}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Navigation */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setIdx(i => Math.max(0, i - 1))}
+          disabled={idx === 0}
+          className="flex-1 py-2.5 border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 disabled:opacity-40 text-sm font-semibold rounded-lg transition-colors"
+        >
+          ← Previous
+        </button>
+
+        {isDone ? (
+          isLast ? (
+            allRequiredDone && !course.completed ? (
+              <button
+                onClick={completeCourse}
+                disabled={completing}
+                className="flex-1 py-2.5 bg-success-600 hover:bg-success-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                {completing ? 'Saving…' : '🎉 Complete Course'}
+              </button>
+            ) : (
+              <button
+                onClick={onBack}
+                className="flex-1 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                ✓ Finish
+              </button>
+            )
+          ) : (
+            <button
+              onClick={() => setIdx(i => i + 1)}
+              className="flex-1 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              Next →
+            </button>
+          )
+        ) : (
+          <button
+            onClick={async () => {
+              await markSection(section.id);
+              if (!isLast) setIdx(i => i + 1);
+            }}
+            disabled={completing}
+            className="flex-1 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            {completing ? 'Saving…' : isLast ? 'Mark Complete' : 'Mark Complete & Next →'}
+          </button>
+        )}
+      </div>
+
+      {/* Section dots */}
+      {sections.length > 1 && (
+        <div className="flex justify-center gap-1.5 mt-4">
+          {sections.map((s, i) => (
+            <button
+              key={s.id}
+              onClick={() => setIdx(i)}
+              className={`w-2 h-2 rounded-full transition-all ${
+                i === idx ? 'bg-primary-500 w-4' :
+                completedSections.has(s.id) ? 'bg-success-400' :
+                'bg-neutral-300 dark:bg-neutral-600'
+              }`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrainingTab({
+  courses, onSectionComplete, onCourseComplete, showToast,
+}: {
+  courses: PortalCourse[];
+  onSectionComplete: (courseId: string, sectionId: string) => Promise<void>;
+  onCourseComplete: (courseId: string) => Promise<void>;
+  showToast: (msg: string) => void;
+}) {
+  const [selectedCourse, setSelectedCourse] = useState<PortalCourse | null>(null);
+
+  if (selectedCourse) {
+    const fresh = courses.find(c => c.id === selectedCourse.id) ?? selectedCourse;
+    return (
+      <CourseViewer
+        course={fresh}
+        onBack={() => setSelectedCourse(null)}
+        onSectionComplete={onSectionComplete}
+        onCourseComplete={onCourseComplete}
+        showToast={showToast}
+      />
+    );
+  }
+
+  if (!courses.length) return (
+    <div className="text-center py-16 border-2 border-dashed border-neutral-200 dark:border-neutral-700 rounded-2xl bg-white dark:bg-neutral-800 mt-2">
+      <div className="text-4xl mb-3">🎓</div>
+      <p className="font-semibold text-neutral-900 dark:text-neutral-100 mb-1">No training assigned</p>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">Your organization will post training courses here.</p>
+    </div>
+  );
+
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-1">Training</h3>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">Complete your assigned courses.</p>
+
+      {courses.map(course => {
+        const total = course.sections.length;
+        const done = course.completedSections.length;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const overdue = course.dueDate && !course.completed && new Date(course.dueDate) < new Date();
+
+        return (
+          <button
+            key={course.id}
+            onClick={() => setSelectedCourse(course)}
+            className={`w-full text-left bg-white dark:bg-neutral-800 border rounded-xl p-5 mb-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99] relative overflow-hidden ${
+              course.completed ? 'border-success-300 dark:border-success-700' :
+              overdue ? 'border-danger-300 dark:border-danger-700' :
+              'border-neutral-200 dark:border-neutral-700'
+            }`}
+          >
+            <div className={`absolute top-0 left-0 right-0 h-0.5 rounded-t-xl`} style={{ backgroundColor: course.color }} />
+
+            <div className="flex items-start gap-3 mb-3">
+              <div className="w-3 h-3 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: course.color }} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="font-semibold text-sm text-neutral-900 dark:text-neutral-100 truncate">{course.title}</p>
+                  {course.completed && (
+                    <span className="flex-shrink-0 text-[11px] font-bold text-success-600 dark:text-success-400">✓ Done</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                  <span>{course.category}</span>
+                  {course.estimatedMinutes > 0 && <span>⏱ {course.estimatedMinutes} min</span>}
+                  {course.dueDate && (
+                    <span className={overdue ? 'text-danger-500 font-semibold' : ''}>
+                      Due {new Date(course.dueDate + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex-shrink-0 text-neutral-400 dark:text-neutral-500 text-sm self-center">›</div>
+            </div>
+
+            {total > 0 && (
+              <div>
+                <div className="h-1.5 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden mb-1">
+                  <div
+                    className={`h-full rounded-full transition-all ${course.completed ? 'bg-success-500' : 'bg-primary-500'}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+                  {course.completed ? 'Completed' : done === 0 ? `${total} section${total !== 1 ? 's' : ''}` : `${done} / ${total} sections`}
+                </p>
+              </div>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
 function ProfileTab({ profile, onProfileUpdate, showToast }: {
@@ -1116,6 +1447,7 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
   const [profile, setProfile] = useState(initialProfile);
   const [events, setEvents]   = useState<PortalEvent[]>([]);
   const [signups, setSignups] = useState<PortalSignup[]>([]);
+  const [courses, setCourses] = useState<PortalCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast]     = useState<string | null>(null);
 
@@ -1124,16 +1456,18 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
     setTimeout(() => setToast(null), 2800);
   };
 
-  // Load events + signups on mount
+  // Load events, signups, and training on mount
   useEffect(() => {
     let cancelled = false;
     Promise.allSettled([
       portalApi.get<PortalEvent[]>('/portal/events'),
       portalApi.get<PortalSignup[]>('/portal/my-signups'),
-    ]).then(([evResult, signupResult]) => {
+      portalApi.get<PortalCourse[]>('/portal/training'),
+    ]).then(([evResult, signupResult, trainingResult]) => {
       if (cancelled) return;
       if (evResult.status === 'fulfilled') setEvents(evResult.value ?? []);
       if (signupResult.status === 'fulfilled') setSignups(signupResult.value ?? []);
+      if (trainingResult.status === 'fulfilled') setCourses(trainingResult.value ?? []);
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
@@ -1178,7 +1512,22 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
     }));
   }, []);
 
+  const handleSectionComplete = useCallback(async (courseId: string, sectionId: string) => {
+    await portalApi.post('/portal/training/progress', { courseId, sectionId });
+    setCourses(prev => prev.map(c => {
+      if (c.id !== courseId) return c;
+      if (c.completedSections.includes(sectionId)) return c;
+      return { ...c, completedSections: [...c.completedSections, sectionId] };
+    }));
+  }, []);
+
+  const handleCourseComplete = useCallback(async (courseId: string) => {
+    await portalApi.post('/portal/training/complete', { courseId });
+    setCourses(prev => prev.map(c => c.id === courseId ? { ...c, completed: true } : c));
+  }, []);
+
   const upcomingSignupCount = signups.filter(s => isUpcoming(s.start_date)).length;
+  const trainingCount = courses.filter(c => !c.completed).length;
 
   if (loading) return (
     <div className="min-h-screen flex flex-col bg-neutral-50 dark:bg-neutral-950">
@@ -1199,9 +1548,10 @@ function Dashboard({ profile: initialProfile, onLogout }: { profile: VolunteerPr
         {tab === 'home'     && <HomeTab profile={profile} signups={signups} events={events} setTab={setTab} />}
         {tab === 'events'   && <EventsTab events={events} signups={signups} onSignup={handleSignup} onCancel={handleCancel} showToast={showToast} />}
         {tab === 'myevents' && <MyEventsTab signups={signups} onCancel={handleCancel} showToast={showToast} />}
+        {tab === 'training' && <TrainingTab courses={courses} onSectionComplete={handleSectionComplete} onCourseComplete={handleCourseComplete} showToast={showToast} />}
         {tab === 'profile'  && <ProfileTab profile={profile} onProfileUpdate={setProfile} showToast={showToast} />}
       </div>
-      <BottomNav tab={tab} setTab={setTab} myCount={upcomingSignupCount} />
+      <BottomNav tab={tab} setTab={setTab} myCount={upcomingSignupCount} trainingCount={trainingCount} />
 
       {toast && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-neutral-900 dark:bg-neutral-700 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-xl whitespace-nowrap z-[200]">
