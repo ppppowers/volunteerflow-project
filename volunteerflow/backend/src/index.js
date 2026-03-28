@@ -1416,6 +1416,37 @@ app.get('/api/events/:id', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/events/:id/shifts/:shiftId/signups', requireAuth, async (req, res) => {
+  try {
+    const { id: eventId, shiftId } = req.params;
+    const { rows } = await pool.query(
+      `SELECT a.id, a.status, a.created_at,
+              v.id AS volunteer_id, v.first_name, v.last_name, v.email, v.phone, v.avatar
+       FROM applications a
+       JOIN volunteers v ON v.id = a.volunteer_id
+       WHERE a.event_id = $1 AND a.shift_id = $2 AND a.org_id = $3
+       ORDER BY a.created_at ASC`,
+      [eventId, shiftId, req.orgId]
+    );
+    res.json({ success: true, data: rows.map(r => ({
+      id: r.id,
+      status: r.status,
+      signedUpAt: r.created_at,
+      volunteer: {
+        id: r.volunteer_id,
+        firstName: r.first_name,
+        lastName: r.last_name,
+        email: r.email,
+        phone: r.phone ?? null,
+        avatar: r.avatar ?? null,
+      },
+    })) });
+  } catch (err) {
+    console.error('GET shift signups error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch shift signups' });
+  }
+});
+
 app.post('/api/events', requireAuth, async (req, res) => {
   try {
     const {

@@ -73,6 +73,20 @@ interface EligibilitySettings {
   customRequirements: string[];
 }
 
+interface ShiftSignupEntry {
+  id: string;
+  status: string;
+  signedUpAt: string;
+  volunteer: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string | null;
+    avatar: string | null;
+  };
+}
+
 type EventStatus = 'draft' | 'published' | 'cancelled' | 'completed';
 type EventCategory =
   | 'community'
@@ -513,6 +527,21 @@ export default function Events() {
   const [usingMockData, setUsingMockData] = useState(false);
   const [editingEvent, setEditingEvent] = useState<VolunteerEvent | null>(null);
   const [activeEvent, setActiveEvent] = useState<VolunteerEvent | null>(null);
+  const [openShiftId, setOpenShiftId] = useState<string | null>(null);
+  const [shiftSignups, setShiftSignups] = useState<Record<string, { loading: boolean; data: ShiftSignupEntry[] }>>({});
+
+  const toggleShift = async (eventId: string, shiftId: string) => {
+    if (openShiftId === shiftId) { setOpenShiftId(null); return; }
+    setOpenShiftId(shiftId);
+    if (shiftSignups[shiftId]) return; // already loaded
+    setShiftSignups(prev => ({ ...prev, [shiftId]: { loading: true, data: [] } }));
+    try {
+      const res = await api.get(`/events/${eventId}/shifts/${shiftId}/signups`) as any;
+      setShiftSignups(prev => ({ ...prev, [shiftId]: { loading: false, data: res.data ?? [] } }));
+    } catch {
+      setShiftSignups(prev => ({ ...prev, [shiftId]: { loading: false, data: [] } }));
+    }
+  };
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -1614,33 +1643,89 @@ export default function Events() {
             Shifts ({activeEvent.shifts.length})
           </h2>
           <div className="space-y-3">
-            {activeEvent.shifts.map((s) => (
-              <Card key={s.id} className="p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{s.name}</h4>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                      <span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" />{formatDate(s.date)}</span>
-                      <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{formatTime(s.startTime)} – {formatTime(s.endTime)}</span>
-                      <span className="flex items-center gap-1"><Briefcase className="w-3.5 h-3.5" />{s.role}</span>
+            {activeEvent.shifts.map((s) => {
+              const isOpen = openShiftId === s.id;
+              const rosterEntry = shiftSignups[s.id];
+              return (
+                <Card key={s.id} className="overflow-hidden">
+                  <button
+                    type="button"
+                    className="w-full text-left p-4 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors"
+                    onClick={() => toggleShift(activeEvent.id, s.id)}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {isOpen
+                            ? <ChevronDown className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+                            : <ChevronRight className="w-4 h-4 text-neutral-400 flex-shrink-0" />}
+                          <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{s.name}</h4>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400 mt-1 ml-6">
+                          <span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" />{formatDate(s.date)}</span>
+                          <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{formatTime(s.startTime)} – {formatTime(s.endTime)}</span>
+                          <span className="flex items-center gap-1"><Briefcase className="w-3.5 h-3.5" />{s.role}</span>
+                        </div>
+                        {s.description && <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 ml-6">{s.description}</p>}
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-neutral-900 dark:text-neutral-100">{s.signedUp} / {s.capacity}</p>
+                          <p className="text-[10px] text-neutral-500 dark:text-neutral-400">volunteers</p>
+                        </div>
+                        <div className="w-20 h-2 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${s.signedUp / s.capacity >= 0.9 ? 'bg-danger-500' : s.signedUp / s.capacity >= 0.6 ? 'bg-warning-500' : 'bg-success-500'}`}
+                            style={{ width: `${Math.min(100, (s.signedUp / s.capacity) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
-                    {s.description && <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1">{s.description}</p>}
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-neutral-900 dark:text-neutral-100">{s.signedUp} / {s.capacity}</p>
-                      <p className="text-[10px] text-neutral-500 dark:text-neutral-400">volunteers</p>
+                  </button>
+
+                  {isOpen && (
+                    <div className="border-t border-neutral-100 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-3">
+                      {rosterEntry?.loading ? (
+                        <div className="flex items-center gap-2 text-sm text-neutral-400 py-2">
+                          <div className="w-4 h-4 border-2 border-neutral-300 border-t-primary-500 rounded-full animate-spin" />
+                          Loading…
+                        </div>
+                      ) : !rosterEntry?.data.length ? (
+                        <p className="text-sm text-neutral-400 dark:text-neutral-500 py-2">No one signed up yet.</p>
+                      ) : (
+                        <ul className="divide-y divide-neutral-100 dark:divide-neutral-700">
+                          {rosterEntry.data.map((entry) => (
+                            <li key={entry.id} className="flex items-center gap-3 py-2">
+                              {entry.volunteer.avatar
+                                ? <img src={entry.volunteer.avatar} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                                : <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center text-xs font-bold text-primary-600 dark:text-primary-400 flex-shrink-0">
+                                    {entry.volunteer.firstName[0]}{entry.volunteer.lastName[0]}
+                                  </div>
+                              }
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
+                                  {entry.volunteer.firstName} {entry.volunteer.lastName}
+                                </p>
+                                <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{entry.volunteer.email}</p>
+                              </div>
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                                entry.status === 'APPROVED'
+                                  ? 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400'
+                                  : entry.status === 'PENDING'
+                                  ? 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400'
+                                  : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-400'
+                              }`}>
+                                {entry.status}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
-                    <div className="w-20 h-2 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${s.signedUp / s.capacity >= 0.9 ? 'bg-danger-500' : s.signedUp / s.capacity >= 0.6 ? 'bg-warning-500' : 'bg-success-500'}`}
-                        style={{ width: `${Math.min(100, (s.signedUp / s.capacity) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ))}
+                  )}
+                </Card>
+              );
+            })}
           </div>
         </div>
 
