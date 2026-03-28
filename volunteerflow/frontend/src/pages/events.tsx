@@ -536,8 +536,8 @@ export default function Events() {
     if (shiftSignups[shiftId]) return; // already loaded
     setShiftSignups(prev => ({ ...prev, [shiftId]: { loading: true, data: [] } }));
     try {
-      const res = await api.get(`/events/${eventId}/shifts/${shiftId}/signups`) as any;
-      setShiftSignups(prev => ({ ...prev, [shiftId]: { loading: false, data: res.data ?? [] } }));
+      const data = await api.get<ShiftSignupEntry[]>(`/events/${eventId}/shifts/${shiftId}/signups`);
+      setShiftSignups(prev => ({ ...prev, [shiftId]: { loading: false, data: data ?? [] } }));
     } catch {
       setShiftSignups(prev => ({ ...prev, [shiftId]: { loading: false, data: [] } }));
     }
