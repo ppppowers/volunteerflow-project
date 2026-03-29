@@ -70,6 +70,8 @@ const SCHEMA_SQL = `
     welcome_subtext      TEXT     NOT NULL DEFAULT '',
     footer_text          TEXT     NOT NULL DEFAULT '',
     show_powered_by      BOOLEAN  NOT NULL DEFAULT TRUE,
+    checkr_api_key       TEXT     NOT NULL DEFAULT '',
+    checkr_package       TEXT     NOT NULL DEFAULT 'tasker_standard',
     retention_volunteers TEXT     NOT NULL DEFAULT '12',
     retention_events     TEXT     NOT NULL DEFAULT '36',
     retention_applications TEXT   NOT NULL DEFAULT '24',
@@ -129,6 +131,9 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_portal_settings_org ON portal_settings(org_id);
 
+  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS checkr_api_key TEXT NOT NULL DEFAULT '';
+  ALTER TABLE org_settings ADD COLUMN IF NOT EXISTS checkr_package TEXT NOT NULL DEFAULT 'tasker_standard';
+
   -- ── Volunteers ────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS volunteers (
     id                TEXT        PRIMARY KEY,
@@ -150,6 +155,11 @@ const SCHEMA_SQL = `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_volunteers_email_org ON volunteers(email, org_id);
   ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS password_hash TEXT;
   ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]';
+  ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS checkr_candidate_id TEXT;
+  ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS checkr_report_id TEXT;
+  ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS checkr_status TEXT;
+  ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS checkr_report_url TEXT;
+  ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS background_checked_at TIMESTAMPTZ;
 
   -- ── Events ────────────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS events (

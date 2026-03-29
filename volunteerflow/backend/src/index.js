@@ -1521,6 +1521,153 @@ app.get('/api/hours/report', requireAuth, async (req, res) => {
   }
 });
 
+// ===== BACKGROUND CHECKS (Checkr) =====
+
+// Helper: call Checkr REST API
+async function checkrRequest(apiKey, method, path, body) {
+  const res = await fetch(`https://api.checkr.com/v1${path}`, {
+    method,
+    headers: {
+      'Authorization': `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || json.message || `Checkr ${res.status}`);
+  return json;
+}
+
+// Initiate a background check invite for a volunteer
+app.post('/api/background-checks/invite', requireAuth, async (req, res) => {
+  try {
+    const { volunteerId } = req.body;
+    if (!volunteerId) return res.status(400).json({ success: false, error: 'volunteerId required' });
+
+    // Get org Checkr config
+    const { rows: settingsRows } = await pool.query(
+      'SELECT checkr_api_key, checkr_package FROM org_settings WHERE id = $1', [req.orgId]
+    );
+    const settings = settingsRows[0];
+    if (!settings?.checkr_api_key) {
+      return res.status(400).json({ success: false, error: 'Checkr API key not configured. Add it in Settings > Integrations.' });
+    }
+
+    // Get volunteer info
+    const { rows: volRows } = await pool.query(
+      'SELECT first_name, last_name, email, checkr_candidate_id FROM volunteers WHERE id = $1 AND org_id = $2',
+      [volunteerId, req.orgId]
+    );
+    if (!volRows.length) return res.status(404).json({ success: false, error: 'Volunteer not found' });
+    const vol = volRows[0];
+
+    // Create or reuse Checkr candidate
+    let candidateId = vol.checkr_candidate_id;
+    if (!candidateId) {
+      const candidate = await checkrRequest(settings.checkr_api_key, 'POST', '/candidates', {
+        email: vol.email,
+        first_name: vol.first_name,
+        last_name: vol.last_name,
+      });
+      candidateId = candidate.id;
+      await pool.query(
+        'UPDATE volunteers SET checkr_candidate_id = $1 WHERE id = $2 AND org_id = $3',
+        [candidateId, volunteerId, req.orgId]
+      );
+    }
+
+    // Create invitation (volunteer fills in their own SSN/DOB on Checkr's hosted page)
+    const invitation = await checkrRequest(settings.checkr_api_key, 'POST', '/invitations', {
+      candidate_id: candidateId,
+      package: settings.checkr_package || 'tasker_standard',
+      work_locations: [{ country: 'US' }],
+    });
+
+    // Mark status as pending
+    await pool.query(
+      `UPDATE volunteers SET checkr_status = 'pending', checkr_candidate_id = $1 WHERE id = $2 AND org_id = $3`,
+      [candidateId, volunteerId, req.orgId]
+    );
+
+    logAudit({ req, category: 'volunteer', verb: 'background_check_invited',
+      resource: `${vol.first_name} ${vol.last_name}`,
+      detail: `Background check invitation sent via Checkr` });
+
+    res.json({ success: true, invitation_url: invitation.invitation_url, status: 'pending' });
+  } catch (err) {
+    console.error('POST /api/background-checks/invite error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get background check status for a volunteer
+app.get('/api/background-checks/:volunteerId', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT checkr_candidate_id, checkr_report_id, checkr_status, checkr_report_url, background_checked_at
+       FROM volunteers WHERE id = $1 AND org_id = $2`,
+      [req.params.volunteerId, req.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Volunteer not found' });
+    res.json({ success: true, ...rows[0] });
+  } catch (err) {
+    console.error('GET /api/background-checks/:volunteerId error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch background check status' });
+  }
+});
+
+// Checkr webhook — receives status updates from Checkr
+const CHECKR_WEBHOOK_SECRET = process.env.CHECKR_WEBHOOK_SECRET;
+app.post('/api/background-checks/webhook', async (req, res) => {
+  // Verify Checkr HMAC-SHA256 signature when secret is configured
+  if (CHECKR_WEBHOOK_SECRET) {
+    const sig = req.headers['x-checkr-signature'];
+    if (!sig) return res.sendStatus(401);
+    const expected = crypto
+      .createHmac('sha256', CHECKR_WEBHOOK_SECRET)
+      .update(req.rawBody)
+      .digest('hex');
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+      return res.sendStatus(401);
+    }
+  }
+
+  try {
+    const event = req.body;
+    const { type, data } = event;
+
+    if (!data?.object) return res.sendStatus(200);
+
+    const obj = data.object;
+
+    if (type === 'report.completed' || type === 'report.upgraded' || type === 'report.disputed') {
+      const reportId   = obj.id;
+      const candidateId = obj.candidate_id;
+      const status     = obj.status;      // clear | consider | suspended | dispute
+      const reportUrl  = obj.report_url || null;
+
+      await pool.query(
+        `UPDATE volunteers SET checkr_report_id = $1, checkr_status = $2, checkr_report_url = $3,
+         background_checked_at = NOW() WHERE checkr_candidate_id = $4`,
+        [reportId, status, reportUrl, candidateId]
+      );
+    }
+
+    if (type === 'invitation.completed') {
+      const candidateId = obj.candidate_id;
+      await pool.query(
+        `UPDATE volunteers SET checkr_status = 'processing' WHERE checkr_candidate_id = $1 AND checkr_status = 'pending'`,
+        [candidateId]
+      );
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('POST /api/background-checks/webhook error:', err.message);
+    res.sendStatus(500);
+  }
+});
+
 // ===== EVENTS CRUD =====
 const EVENTS_LIST_SQL = `
   SELECT e.*,
@@ -3825,6 +3972,9 @@ function mapOrgSettings(s) {
     description:      s.description        || '',
     taxId:            s.tax_id             || '',
     logoUrl:          s.logo_url           || '',
+    // Checkr API key is masked — only return whether it is set, not the actual value
+    checkrApiKeySet:  !!(s.checkr_api_key),
+    checkrPackage:    s.checkr_package     || 'tasker_standard',
   };
 }
 
@@ -3994,6 +4144,30 @@ app.put('/api/messaging', requireAuth, writeLimiter, async (req, res) => {
   } catch (err) {
     console.error('PUT /api/messaging error:', err.message);
     res.status(500).json({ success: false, error: 'Failed to save messaging settings' });
+  }
+});
+
+// ── Integrations settings (Checkr, etc.) ──────────────────────────────────────
+
+app.put('/api/integrations', requireAuth, writeLimiter, async (req, res) => {
+  const { checkrApiKey, checkrPackage } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO org_settings (id, checkr_api_key, checkr_package, updated_at)
+       VALUES ($3,$1,$2,NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         checkr_api_key=$1, checkr_package=$2, updated_at=NOW()`,
+      [
+        (checkrApiKey  || '').trim().slice(0, 200),
+        (checkrPackage || 'tasker_standard').trim().slice(0, 100),
+        req.orgId,
+      ]
+    );
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Integrations', detail: 'Checkr settings updated' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('PUT /api/integrations error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to save integration settings' });
   }
 });
 

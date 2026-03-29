@@ -25,6 +25,8 @@ import {
   Edit2,
   Phone,
   Mail,
+  ShieldCheck,
+  ExternalLink,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -40,6 +42,7 @@ interface VettingNote {
 
 interface VettingApplicant {
   id: string;
+  volunteerId: string;
   name: string;
   email: string;
   phone: string;
@@ -50,6 +53,14 @@ interface VettingApplicant {
   flagged: boolean;
   notes: VettingNote[];
   answers: { question: string; answer: string }[];
+}
+
+interface BgCheckData {
+  checkr_candidate_id: string | null;
+  checkr_report_id: string | null;
+  checkr_status: string | null;
+  checkr_report_url: string | null;
+  background_checked_at: string | null;
 }
 
 // ─── API adapter ──────────────────────────────────────────────────────────────
@@ -83,6 +94,7 @@ function mapApiApplication(a: ApiApplication): VettingApplicant {
 
   return {
     id: a.id,
+    volunteerId: a.volunteerId,
     name,
     email: a.volunteer?.email ?? '',
     phone: '',
@@ -120,6 +132,25 @@ function StageBadge({ stage }: { stage: VettingStage }) {
   );
 }
 
+const BG_STATUS_CFG: Record<string, { label: string; className: string }> = {
+  pending:    { label: 'Invite Sent',   className: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400' },
+  processing: { label: 'Running',       className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400' },
+  clear:      { label: 'Clear',         className: 'bg-success-100 text-success-700 dark:bg-success-900/40 dark:text-success-400' },
+  consider:   { label: 'Needs Review',  className: 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-400' },
+  suspended:  { label: 'Suspended',     className: 'bg-danger-100 text-danger-700 dark:bg-danger-900/40 dark:text-danger-400' },
+};
+
+function BgCheckBadge({ status, size = 'sm' }: { status: string | null; size?: 'sm' | 'md' }) {
+  if (!status) return null;
+  const cfg = BG_STATUS_CFG[status] ?? BG_STATUS_CFG.pending;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold ${size === 'md' ? 'text-xs' : 'text-[11px]'} ${cfg.className}`}>
+      <ShieldCheck className={size === 'md' ? 'w-3.5 h-3.5' : 'w-3 h-3'} />
+      {cfg.label}
+    </span>
+  );
+}
+
 function StarRating({ value, onChange }: { value: number | null; onChange?: (v: number) => void }) {
   return (
     <div className="flex gap-0.5">
@@ -151,7 +182,15 @@ function DetailPanel({
   onClose: () => void;
 }) {
   const [noteText, setNoteText] = useState('');
+  const [bgCheck, setBgCheck] = useState<BgCheckData | null>(null);
   const cfg = stageCfg(applicant.stage);
+
+  useEffect(() => {
+    if (!applicant.volunteerId) return;
+    api.get<BgCheckData>(`/background-checks/${applicant.volunteerId}`)
+      .then(setBgCheck)
+      .catch(() => {});
+  }, [applicant.volunteerId]);
 
   const advance = () => {
     if (!cfg.next) return;
@@ -246,6 +285,41 @@ function DetailPanel({
             </div>
           )}
 
+          {/* Background Check */}
+          {(applicant.stage === 'background' || bgCheck?.checkr_status) && (
+            <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" /> Background Check
+                </p>
+                {bgCheck?.checkr_status && <BgCheckBadge status={bgCheck.checkr_status} size="md" />}
+              </div>
+              {bgCheck?.checkr_status ? (
+                <div className="space-y-1.5">
+                  {bgCheck.background_checked_at && (
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                      Completed {new Date(bgCheck.background_checked_at).toLocaleDateString()}
+                    </p>
+                  )}
+                  {bgCheck.checkr_report_url && (
+                    <a
+                      href={bgCheck.checkr_report_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                    >
+                      View Checkr Report <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-400 italic">
+                  No background check initiated yet. Run one from the volunteer&apos;s profile.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Application answers */}
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-neutral-400 mb-3">Application Responses</p>
@@ -299,6 +373,7 @@ export default function VettingPage() {
   const [search, setSearch] = useState('');
   const [filterStage, setFilterStage] = useState<VettingStage | ''>('');
   const [selected, setSelected] = useState<VettingApplicant | null>(null);
+  const [bgStatuses, setBgStatuses] = useState<Record<string, BgCheckData>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -316,6 +391,24 @@ export default function VettingPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Fetch bg check statuses for background-stage applicants
+  useEffect(() => {
+    const toFetch = applicants.filter((a) => a.stage === 'background' && a.volunteerId);
+    if (toFetch.length === 0) return;
+    Promise.allSettled(
+      toFetch.map((a) =>
+        api.get<BgCheckData>(`/background-checks/${a.volunteerId}`)
+          .then((data) => ({ volunteerId: a.volunteerId, data }))
+      )
+    ).then((results) => {
+      const statuses: Record<string, BgCheckData> = {};
+      results.forEach((r) => {
+        if (r.status === 'fulfilled') statuses[r.value.volunteerId] = r.value.data;
+      });
+      setBgStatuses((prev) => ({ ...prev, ...statuses }));
+    });
+  }, [applicants]);
 
   const filtered = useMemo(() => {
     return applicants.filter((a) => {
@@ -455,10 +548,13 @@ export default function VettingPage() {
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
+                <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                   <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{applicant.name}</p>
                   {applicant.flagged && <Flag className="w-3.5 h-3.5 text-danger-500 flex-shrink-0" />}
                   <StageBadge stage={applicant.stage} />
+                  {applicant.stage === 'background' && (
+                    <BgCheckBadge status={bgStatuses[applicant.volunteerId]?.checkr_status ?? null} />
+                  )}
                 </div>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
                   {applicant.appliedFor} · Applied {applicant.appliedAt}

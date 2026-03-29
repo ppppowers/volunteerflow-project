@@ -36,6 +36,9 @@ import {
   Copy,
   ExternalLink,
   Paintbrush,
+  Puzzle,
+  KeyRound,
+  CheckCircle2,
 } from 'lucide-react';
 
 import { PlanGate } from '@/components/PlanGate';
@@ -52,7 +55,8 @@ type SettingsTab =
   | 'appearance'
   | 'security'
   | 'billing'
-  | 'data';
+  | 'data'
+  | 'integrations';
 
 interface TeamMember {
   id: string;
@@ -2753,6 +2757,164 @@ function MessagingTab() {
   );
 }
 
+// ─── Tab: Integrations ────────────────────────────────────────────────────────
+
+const CHECKR_PACKAGES = [
+  { value: 'tasker_standard',   label: 'Tasker Standard — SSN trace, sex offender, national criminal' },
+  { value: 'tasker_pro',        label: 'Tasker Pro — Standard + employment verification' },
+  { value: 'driver_standard',   label: 'Driver Standard — Includes MVR check' },
+  { value: 'volunteer_basic',   label: 'Volunteer Basic — Identity + national criminal' },
+];
+
+function IntegrationsTab() {
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [saved, setSaved]           = useState(false);
+  const [saveError, setSaveError]   = useState('');
+  const [showKey, setShowKey]       = useState(false);
+  const [keyIsSet, setKeyIsSet]     = useState(false);
+  const [form, setForm] = useState({ checkrApiKey: '', checkrPackage: 'tasker_standard' });
+
+  useEffect(() => {
+    api.get<{ checkrApiKeySet: boolean; checkrPackage: string }>('/settings')
+      .then((data) => {
+        setKeyIsSet(!!data.checkrApiKeySet);
+        setForm((f) => ({ ...f, checkrPackage: data.checkrPackage || 'tasker_standard' }));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError('');
+    try {
+      await api.put('/integrations', form);
+      if (form.checkrApiKey) setKeyIsSet(true);
+      setForm((f) => ({ ...f, checkrApiKey: '' }));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: unknown) {
+      setSaveError((err as { message?: string })?.message || 'Failed to save.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Checkr */}
+      <Card className="p-6">
+        <div className="flex items-start gap-4 mb-6">
+          <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+            <KeyRound className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Checkr Background Checks</h2>
+              {keyIsSet && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400">
+                  <CheckCircle2 className="w-3 h-3" /> Connected
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
+              Run FCRA-compliant background checks on volunteers directly from their profile. Volunteers receive a secure invite link and enter their own information — you never handle SSNs.
+            </p>
+          </div>
+          <a
+            href="https://checkr.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline flex-shrink-0"
+          >
+            Get API key <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+
+        <div className="space-y-4">
+          <Field
+            label={keyIsSet ? 'Replace API Key' : 'API Key'}
+            hint={keyIsSet ? 'A key is already saved. Enter a new one to replace it, or leave blank to keep the current key.' : 'Find this in your Checkr Dashboard → Developer → API keys. Use a Live key for production.'}
+          >
+            <div className="relative">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={form.checkrApiKey}
+                onChange={(e) => setForm((f) => ({ ...f, checkrApiKey: e.target.value }))}
+                placeholder={keyIsSet ? '••••••••••••••••••••••••' : 'sk_live_...'}
+                className={inputClass}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+              >
+                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </Field>
+
+          <Field label="Default Package" hint="The screening package sent to volunteers when you initiate a check. You can override this per-volunteer.">
+            <select
+              value={form.checkrPackage}
+              onChange={(e) => setForm((f) => ({ ...f, checkrPackage: e.target.value }))}
+              className={selectClass}
+            >
+              {CHECKR_PACKAGES.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 p-4 text-sm text-neutral-600 dark:text-neutral-400 space-y-1.5">
+            <p className="font-semibold text-neutral-700 dark:text-neutral-300">How it works</p>
+            <ol className="list-decimal list-inside space-y-1 text-xs">
+              <li>You click "Run Background Check" on a volunteer's profile</li>
+              <li>The volunteer receives an email from Checkr with a secure link</li>
+              <li>They enter their own SSN, DOB, and address on Checkr's hosted page</li>
+              <li>Checkr runs the check and sends the result back via webhook</li>
+              <li>Status updates automatically on the volunteer's profile: <strong>Clear</strong>, <strong>Consider</strong>, or <strong>Suspended</strong></li>
+            </ol>
+          </div>
+
+          {saveError && (
+            <p className="text-sm text-danger-600 dark:text-danger-400">{saveError}</p>
+          )}
+
+          <div className="flex items-center gap-3 pt-1">
+            <Button onClick={handleSave} disabled={saving} className="flex items-center gap-2">
+              {saving ? 'Saving…' : saved ? <><Check className="w-4 h-4" /> Saved</> : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Coming soon placeholder */}
+      <Card className="p-6 opacity-60">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-lg bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center flex-shrink-0">
+            <Puzzle className="w-5 h-5 text-neutral-400" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">More integrations coming soon</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Salesforce, Blackbaud, Zapier, and more — email us at integrations@volunteerflow.com to request one</p>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 const TABS: { id: SettingsTab; label: string; icon: typeof Building2 }[] = [
@@ -2765,6 +2927,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Building2 }[] = [
   { id: 'security',     label: 'Security',       icon: Shield        },
   { id: 'billing',      label: 'Billing',        icon: CreditCard    },
   { id: 'data',         label: 'Data & Privacy', icon: Database      },
+  { id: 'integrations', label: 'Integrations',   icon: Puzzle        },
 ];
 
 export default function Settings() {
@@ -2781,6 +2944,7 @@ case 'notifications': return <NotificationsTab />;
       case 'security':      return <SecurityTab />;
       case 'billing':       return <BillingTab />;
       case 'data':          return <DataTab />;
+      case 'integrations':  return <IntegrationsTab />;
     }
   };
 

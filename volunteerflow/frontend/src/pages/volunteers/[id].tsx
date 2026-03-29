@@ -11,7 +11,7 @@ import {
   Hash, Clock, History, FileText, ExternalLink, TrendingUp, Award, Target,
   Users, Briefcase, CheckSquare, Square, Plus, Trash2, CheckCircle2,
   Settings, Shield, BadgeCheck, AlarmCheck, CheckCircle, AlertTriangle,
-  GraduationCap, Tag,
+  GraduationCap, Tag, ShieldCheck, RefreshCw,
 } from 'lucide-react';
 import {
   mockVolunteers, defaultChecklistTemplates, defaultCertificationTemplates,
@@ -34,6 +34,14 @@ interface ApiVolunteer {
   tags?: string[];
   hoursContributed?: number;
   status: string;
+}
+
+interface BgCheck {
+  checkr_candidate_id: string | null;
+  checkr_report_id: string | null;
+  checkr_status: string | null;
+  checkr_report_url: string | null;
+  background_checked_at: string | null;
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
@@ -78,6 +86,39 @@ export default function VolunteerDetail() {
     name: '', email: '', phone: '', location: '', skills: '',
     status: 'active' as 'active' | 'inactive' | 'pending', avatar: '',
   });
+
+  // ── Background check ──────────────────────────────────────────────────────
+  const [bgCheck, setBgCheck]     = useState<BgCheck | null>(null);
+  const [bgInviting, setBgInviting] = useState(false);
+  const [bgError, setBgError]     = useState('');
+  const [bgToast, setBgToast]     = useState('');
+
+  useEffect(() => {
+    if (!id) return;
+    api.get<{ check: BgCheck }>(`/background-checks/${id}`)
+      .then((res) => setBgCheck((res as any).check ?? null))
+      .catch(() => {});
+  }, [id]);
+
+  const handleRunCheck = async () => {
+    if (!volunteer) return;
+    setBgInviting(true);
+    setBgError('');
+    try {
+      const res = await api.post<{ invitation_url: string; status: string }>(
+        '/background-checks/invite', { volunteerId: volunteer.id }
+      );
+      setBgCheck((prev) => ({ ...(prev ?? { checkr_candidate_id: null, checkr_report_id: null, checkr_report_url: null, background_checked_at: null }), checkr_status: 'pending' }));
+      setBgToast('Invitation sent — volunteer will receive an email from Checkr');
+      setTimeout(() => setBgToast(''), 4000);
+      // Open the invitation URL in a new tab so staff can copy/share it if needed
+      if ((res as any).invitation_url) window.open((res as any).invitation_url, '_blank');
+    } catch (err: any) {
+      setBgError(err?.message ?? 'Failed to send invitation');
+    } finally {
+      setBgInviting(false);
+    }
+  };
 
   // ── Tag management ────────────────────────────────────────────────────────
   const [orgTags, setOrgTags] = useState<string[]>([]);
@@ -553,6 +594,75 @@ export default function VolunteerDetail() {
               </div>
             </Card>
 
+            {/* Background Check */}
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                  <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Background Check</h3>
+                </div>
+                {(() => {
+                  const s = bgCheck?.checkr_status;
+                  if (!s) return null;
+                  const map: Record<string, string> = {
+                    pending:    'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400',
+                    processing: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
+                    clear:      'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400',
+                    consider:   'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400',
+                    suspended:  'bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400',
+                  };
+                  const label: Record<string, string> = {
+                    pending: 'Invite Sent', processing: 'Running', clear: 'Clear',
+                    consider: 'Needs Review', suspended: 'Suspended',
+                  };
+                  return (
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${map[s] ?? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'}`}>
+                      {label[s] ?? s}
+                    </span>
+                  );
+                })()}
+              </div>
+
+              <div className="space-y-3">
+                {bgCheck?.background_checked_at && (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Completed {new Date(bgCheck.background_checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </p>
+                )}
+                {bgCheck?.checkr_report_url && (
+                  <a
+                    href={bgCheck.checkr_report_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-primary-600 dark:text-primary-400 hover:underline"
+                  >
+                    <ExternalLink className="w-3 h-3" /> View Checkr Report
+                  </a>
+                )}
+                {bgError && (
+                  <p className="text-xs text-danger-600 dark:text-danger-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> {bgError}
+                  </p>
+                )}
+                {!bgCheck?.checkr_status || bgCheck.checkr_status === 'consider' || bgCheck.checkr_status === 'suspended' ? (
+                  <Button
+                    onClick={handleRunCheck}
+                    disabled={bgInviting}
+                    className="w-full flex items-center justify-center gap-2 text-sm"
+                  >
+                    {bgInviting
+                      ? <><RefreshCw className="w-4 h-4 animate-spin" /> Sending…</>
+                      : <><ShieldCheck className="w-4 h-4" /> {bgCheck?.checkr_status ? 'Re-run Background Check' : 'Run Background Check'}</>
+                    }
+                  </Button>
+                ) : bgCheck.checkr_status === 'pending' || bgCheck.checkr_status === 'processing' ? (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 italic text-center">
+                    {bgCheck.checkr_status === 'pending' ? 'Waiting for volunteer to complete the form…' : 'Check is running — results typically take 1–3 days'}
+                  </p>
+                ) : null}
+              </div>
+            </Card>
+
             {/* Skills */}
             <Card className="p-6">
               <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Skills & Expertise</h3>
@@ -1001,5 +1111,12 @@ export default function VolunteerDetail() {
         </div>
       </div>
     </Layout>
+
+    {bgToast && (
+      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-semibold rounded-xl shadow-2xl">
+        <CheckCircle2 className="w-4 h-4 text-success-400 dark:text-success-600 flex-shrink-0" />
+        {bgToast}
+      </div>
+    )}
   );
 }
