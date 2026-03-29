@@ -11,8 +11,9 @@ import {
   Hash, Clock, History, FileText, ExternalLink, TrendingUp, Award, Target,
   Users, Briefcase, CheckSquare, Square, Plus, Trash2, CheckCircle2,
   Settings, Shield, BadgeCheck, AlarmCheck, CheckCircle, AlertTriangle,
-  GraduationCap, Tag, ShieldCheck, RefreshCw,
+  GraduationCap, Tag, ShieldCheck, RefreshCw, Crown, Lock,
 } from 'lucide-react';
+import { usePlan } from '@/context/usePlan';
 import {
   mockVolunteers, defaultChecklistTemplates, defaultCertificationTemplates,
   type Volunteer, type EventParticipation, type ChecklistItem,
@@ -34,6 +35,7 @@ interface ApiVolunteer {
   tags?: string[];
   hoursContributed?: number;
   status: string;
+  isLeader?: boolean;
 }
 
 interface BgCheck {
@@ -86,6 +88,24 @@ export default function VolunteerDetail() {
     name: '', email: '', phone: '', location: '', skills: '',
     status: 'active' as 'active' | 'inactive' | 'pending', avatar: '',
   });
+
+  const { can } = usePlan();
+
+  // ── Leader toggle ─────────────────────────────────────────────────────────
+  const [leaderLoading, setLeaderLoading] = useState(false);
+
+  const handleToggleLeader = async () => {
+    if (!volunteer) return;
+    setLeaderLoading(true);
+    try {
+      const res = await api.patch<{ data: { isLeader: boolean } }>(`/volunteers/${volunteer.id}/leader`, { isLeader: !volunteer.isLeader });
+      setVolunteer({ ...volunteer, isLeader: (res as any).data?.isLeader ?? !volunteer.isLeader });
+    } catch {
+      // ignore
+    } finally {
+      setLeaderLoading(false);
+    }
+  };
 
   // ── Background check ──────────────────────────────────────────────────────
   const [bgCheck, setBgCheck]     = useState<BgCheck | null>(null);
@@ -180,6 +200,7 @@ export default function VolunteerDetail() {
           events: [],
           checklist: [],
           certifications: [],
+          isLeader: data.isLeader ?? false,
         };
         setVolunteer(v);
         setFormData({ name: v.name, email: v.email, phone: v.phone, location: v.location, skills: v.skills.join(', '), status: v.status, avatar: v.avatar || '' });
@@ -593,6 +614,43 @@ export default function VolunteerDetail() {
                   <span className="font-bold text-neutral-900 dark:text-neutral-100">{volunteer.hoursContributed}</span>
                 </div>
               </div>
+            </Card>
+
+            {/* Leader / Captain */}
+            <Card className="p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Crown className="w-5 h-5 text-amber-500" />
+                <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Leader / Captain</h3>
+                {!can('leader_user_type') && <Lock className="w-3.5 h-3.5 text-neutral-400 ml-auto" />}
+              </div>
+              {can('leader_user_type') ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                      {volunteer.isLeader
+                        ? 'This volunteer is designated as a leader/captain.'
+                        : 'Designate this volunteer as a leader or captain.'}
+                    </p>
+                    {volunteer.isLeader && (
+                      <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                        <Crown className="w-3 h-3" />
+                        Leader
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleToggleLeader}
+                    disabled={leaderLoading}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${volunteer.isLeader ? 'bg-amber-500' : 'bg-neutral-300 dark:bg-neutral-600'} disabled:opacity-50`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${volunteer.isLeader ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-neutral-400 dark:text-neutral-500">
+                  Upgrade to Enterprise to designate volunteer leaders and captains.
+                </p>
+              )}
             </Card>
 
             {/* Background Check */}

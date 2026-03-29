@@ -33,6 +33,7 @@ import {
   Check,
   FileText,
   Tag,
+  Crown,
 } from 'lucide-react';
 
 // --- Types ---
@@ -125,6 +126,7 @@ interface Volunteer {
   badges?: VolunteerBadge[];
   completedTrainings?: { courseId: string; courseTitle: string; completedAt: string; }[];
   locationId?: string | null;
+  isLeader?: boolean;
 }
 
 // --- Import Wizard ---
@@ -404,6 +406,7 @@ interface ApiVolunteer {
   hoursContributed?: number;
   status: string;
   locationId?: string | null;
+  isLeader?: boolean;
 }
 
 function mapApiVolunteer(v: ApiVolunteer): Volunteer {
@@ -427,6 +430,7 @@ function mapApiVolunteer(v: ApiVolunteer): Volunteer {
     events: [],
     checklist: [],
     locationId: v.locationId ?? null,
+    isLeader: v.isLeader ?? false,
   };
 }
 
@@ -971,6 +975,12 @@ export default function Volunteers() {
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusConfig[volunteer.status].bg} ${statusConfig[volunteer.status].text}`}>
                       {statusConfig[volunteer.status].label}
                     </span>
+                    {volunteer.isLeader && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                        <Crown className="w-3 h-3" />
+                        Leader
+                      </span>
+                    )}
                     {volunteer.locationId && locationMap[volunteer.locationId] && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
                         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: locationMap[volunteer.locationId].color }} />

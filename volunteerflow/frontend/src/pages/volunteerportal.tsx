@@ -237,7 +237,7 @@ function applyPrimaryPalette(accentHex: string) {
 
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
-function LoginPage({ onLogin, portalColors }: { onLogin: (profile: VolunteerProfile) => void; portalColors: PortalColors }) {
+function LoginPage({ onLogin, portalColors, portalName }: { onLogin: (profile: VolunteerProfile) => void; portalColors: PortalColors; portalName: string }) {
   const [mode, setMode]         = useState<'login' | 'setup'>('login');
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
@@ -342,9 +342,9 @@ function LoginPage({ onLogin, portalColors }: { onLogin: (profile: VolunteerProf
           <div className="w-full max-w-[420px]">
             <div className="flex items-center gap-2.5 mb-10">
               <div className="w-9 h-9 bg-primary-600 dark:bg-primary-500 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">V</span>
+                <span className="text-white font-bold text-sm">{(portalName || 'V')[0].toUpperCase()}</span>
               </div>
-              <span className="text-neutral-900 dark:text-neutral-100 font-bold text-lg">VolunteerFlow</span>
+              <span className="text-neutral-900 dark:text-neutral-100 font-bold text-lg">{portalName || 'VolunteerFlow'}</span>
             </div>
             <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-2">Create your password</h2>
             <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">Set a password for <strong>{email}</strong> to access the portal.</p>
@@ -392,9 +392,9 @@ function LoginPage({ onLogin, portalColors }: { onLogin: (profile: VolunteerProf
         <div className="w-full max-w-[420px]">
           <div className="flex items-center gap-2.5 mb-10">
             <div className="w-9 h-9 bg-primary-600 dark:bg-primary-500 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">V</span>
+              <span className="text-white font-bold text-sm">{(portalName || 'V')[0].toUpperCase()}</span>
             </div>
-            <span className="text-neutral-900 dark:text-neutral-100 font-bold text-lg">VolunteerFlow</span>
+            <span className="text-neutral-900 dark:text-neutral-100 font-bold text-lg">{portalName || 'VolunteerFlow'}</span>
           </div>
 
           <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-2">Welcome back</h2>
@@ -453,7 +453,7 @@ function LoginPage({ onLogin, portalColors }: { onLogin: (profile: VolunteerProf
 
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
-function TopBar({ profile, onLogout, portalColors }: { profile: VolunteerProfile; onLogout: () => void; portalColors: PortalColors }) {
+function TopBar({ profile, onLogout, portalColors, portalName }: { profile: VolunteerProfile; onLogout: () => void; portalColors: PortalColors; portalName: string }) {
   const isLight = isLightColor(portalColors.header);
   const textCls = isLight ? 'text-neutral-800' : 'text-white';
   const mutedCls = isLight ? 'text-neutral-500' : 'text-white/60';
@@ -467,7 +467,7 @@ function TopBar({ profile, onLogout, portalColors }: { profile: VolunteerProfile
         <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: isLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.2)' }}>
           <span className={`font-bold text-xs ${textCls}`}>V</span>
         </div>
-        <span className={`font-bold text-sm ${textCls}`}>VolunteerFlow</span>
+        <span className={`font-bold text-sm ${textCls}`}>{portalName || 'VolunteerFlow'}</span>
       </div>
       <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${badgeCls}`}>
         Volunteer
@@ -1658,7 +1658,7 @@ function ProfileTab({ profile, onProfileUpdate, showToast }: {
 
 // ─── Dashboard Shell ──────────────────────────────────────────────────────────
 
-function Dashboard({ profile: initialProfile, onLogout, portalColors }: { profile: VolunteerProfile; onLogout: () => void; portalColors: PortalColors }) {
+function Dashboard({ profile: initialProfile, onLogout, portalColors, portalName, showPoweredBy }: { profile: VolunteerProfile; onLogout: () => void; portalColors: PortalColors; portalName: string; showPoweredBy: boolean }) {
   const [tab, setTab]         = useState<Tab>('home');
   const [profile, setProfile] = useState(initialProfile);
   const [events, setEvents]   = useState<PortalEvent[]>([]);
@@ -1766,7 +1766,7 @@ function Dashboard({ profile: initialProfile, onLogout, portalColors }: { profil
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: portalColors.bg }}>
-      <TopBar profile={profile} onLogout={onLogout} portalColors={portalColors} />
+      <TopBar profile={profile} onLogout={onLogout} portalColors={portalColors} portalName={portalName} />
       <div className="flex-1 px-5 py-6 pb-24 max-w-2xl mx-auto w-full">
         {tab === 'home'     && <HomeTab profile={profile} signups={signups} events={events} setTab={setTab} portalColors={portalColors} />}
         {tab === 'events'   && <EventsTab events={events} signups={signups} onSignup={handleSignup} onCancel={handleCancel} showToast={showToast} />}
@@ -1775,6 +1775,11 @@ function Dashboard({ profile: initialProfile, onLogout, portalColors }: { profil
         {tab === 'profile'  && <ProfileTab profile={profile} onProfileUpdate={setProfile} showToast={showToast} />}
       </div>
       <BottomNav tab={tab} setTab={setTab} myCount={upcomingSignupCount} trainingCount={trainingCount} />
+      {showPoweredBy && (
+        <div className="pb-20 pt-2 text-center text-[11px] text-neutral-400 dark:text-neutral-600">
+          Powered by <span className="font-semibold">VolunteerFlow</span>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-neutral-900 dark:bg-neutral-700 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-xl whitespace-nowrap z-[200]">
@@ -1790,15 +1795,17 @@ function Dashboard({ profile: initialProfile, onLogout, portalColors }: { profil
 export default function VolunteerPortal() {
   const [profile, setProfile] = useState<VolunteerProfile | null>(null);
   const [portalColors, setPortalColors] = useState<PortalColors>(DEFAULT_COLORS);
+  const [portalName, setPortalName] = useState('');
+  const [showPoweredBy, setShowPoweredBy] = useState(true);
 
-  // Load org portal theme (public endpoint — no auth needed)
+  // Load org portal theme and branding (public endpoint — no auth needed)
   useEffect(() => {
     Promise.allSettled([
       fetch(`${BASE_URL}/portal/settings/volunteer`).then(r => r.json()),
       fetch(`${BASE_URL}/portal/themes`).then(r => r.json()),
     ]).then(([settingsRes, themesRes]) => {
       if (settingsRes.status !== 'fulfilled' || themesRes.status !== 'fulfilled') return;
-      const settings = settingsRes.value as { themeId?: string };
+      const settings = settingsRes.value as { themeId?: string; portalName?: string; showPoweredBy?: boolean };
       const themes = themesRes.value as Array<{ id: string; colors?: PortalColors }>;
       const themeId = settings.themeId ?? 'default';
       const theme = themes.find(t => t.id === themeId) ?? themes[0];
@@ -1806,6 +1813,8 @@ export default function VolunteerPortal() {
         setPortalColors(theme.colors);
         applyPrimaryPalette(theme.colors.accent);
       }
+      if (settings.portalName) setPortalName(settings.portalName);
+      setShowPoweredBy(settings.showPoweredBy !== false);
     }).catch(() => {});
   }, []);
 
@@ -1827,10 +1836,10 @@ export default function VolunteerPortal() {
 
   return (
     <>
-      <Head><title>Volunteer Portal — VolunteerFlow</title></Head>
+      <Head><title>{portalName ? `${portalName} — Volunteer Portal` : 'Volunteer Portal — VolunteerFlow'}</title></Head>
       {profile
-        ? <Dashboard profile={profile} onLogout={handleLogout} portalColors={portalColors} />
-        : <LoginPage onLogin={setProfile} portalColors={portalColors} />
+        ? <Dashboard profile={profile} onLogout={handleLogout} portalColors={portalColors} portalName={portalName} showPoweredBy={showPoweredBy} />
+        : <LoginPage onLogin={setProfile} portalColors={portalColors} portalName={portalName} />
       }
     </>
   );

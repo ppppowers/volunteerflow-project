@@ -31,8 +31,11 @@ import {
   Eye,
   EyeOff,
   LogIn,
+  Lock,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { usePlan } from '@/context/usePlan';
+import { type FeatureKey } from '@/lib/pricing.config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1394,16 +1397,17 @@ function LoginNotificationsTab({ totalVolunteers }: { totalVolunteers: number })
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-const TABS: { id: TabId; label: string; icon: typeof Mail }[] = [
+const TABS: { id: TabId; label: string; icon: typeof Mail; featureKey?: FeatureKey }[] = [
   { id: 'compose',            label: 'Compose',           icon: Send },
   { id: 'templates',          label: 'Templates',          icon: FileText },
   { id: 'reminders',          label: 'Auto Reminders',     icon: Bell },
-  { id: 'job_notifications',  label: 'Job Notifications',  icon: Briefcase },
+  { id: 'job_notifications',  label: 'Job Notifications',  icon: Briefcase, featureKey: 'job_notifications' },
   { id: 'login_notifications',label: 'Sign-in Alerts',     icon: Megaphone },
   { id: 'history',            label: 'Sent History',       icon: Clock },
 ];
 
 export default function MessagesPage() {
+  const { can } = usePlan();
   const [tab, setTab] = useState<TabId>('compose');
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
@@ -1481,7 +1485,22 @@ export default function MessagesPage() {
           aria-label="Messages sections"
           className="flex flex-wrap gap-1 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-xl w-fit max-w-full"
         >
-          {TABS.map(({ id, label, icon: Icon }) => (
+          {TABS.map(({ id, label, icon: Icon, featureKey }) => {
+            const isLocked = !!featureKey && !can(featureKey);
+            if (isLocked) {
+              return (
+                <div
+                  key={id}
+                  title="Upgrade to Enterprise to unlock this feature"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap text-neutral-300 dark:text-neutral-600 cursor-not-allowed select-none"
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                  <Lock className="w-3 h-3 ml-1" />
+                </div>
+              );
+            }
+            return (
             <button
               key={id}
               role="tab"
@@ -1506,7 +1525,8 @@ export default function MessagesPage() {
                 </span>
               )}
             </button>
-          ))}
+          );
+          })}
         </div>
 
         {/* Tab content */}

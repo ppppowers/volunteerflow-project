@@ -23,8 +23,11 @@ import {
   BarChart2,
   MapPin,
   ChevronDown,
+  Lock,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { usePlan } from '@/context/usePlan';
+import { type FeatureKey } from '@/lib/pricing.config';
 
 interface Location { id: string; name: string; color: string; }
 
@@ -53,7 +56,7 @@ function setStoredLocation(loc: Location | null) {
   } catch { /* ignore */ }
 }
 
-const navigation = [
+const navigation: { name: string; href: string; icon: typeof LayoutDashboard; featureKey?: FeatureKey }[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'People', href: '/people', icon: Users },
   { name: 'Events', href: '/events', icon: Calendar },
@@ -66,7 +69,7 @@ const navigation = [
   { name: 'Grant Report', href: '/grant-report', icon: BarChart2 },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'Portal Designer', href: '/portal', icon: Globe },
-  { name: 'Audit Log', href: '/audit', icon: ScrollText },
+  { name: 'Audit Log', href: '/audit', icon: ScrollText, featureKey: 'audit_logs' },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
@@ -86,6 +89,7 @@ function isDevUser(): boolean {
 
 export default function Sidebar() {
   const router = useRouter();
+  const { can } = usePlan();
   const [showDev, setShowDev] = useState(false);
   const [locations, setLocations] = useState<Location[]>([]);
   const [selectedLoc, setSelectedLoc] = useState<{ id: string; name: string } | null>(null);
@@ -128,6 +132,20 @@ export default function Sidebar() {
         {navigation.map((item) => {
           const isActive = router.pathname === item.href;
           const Icon = item.icon;
+          const isLocked = !!item.featureKey && !can(item.featureKey);
+          if (isLocked) {
+            return (
+              <div
+                key={item.name}
+                title="Upgrade to Enterprise to unlock this feature"
+                className="flex items-center gap-3 px-3 py-2.5 rounded-2xl text-neutral-300 dark:text-neutral-600 cursor-not-allowed select-none"
+              >
+                <Icon className="w-[18px] h-[18px] shrink-0" aria-hidden="true" />
+                <span className="text-sm font-medium">{item.name}</span>
+                <Lock className="w-3 h-3 ml-auto shrink-0" />
+              </div>
+            );
+          }
           return (
             <Link
               key={item.name}

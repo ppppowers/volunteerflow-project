@@ -41,6 +41,12 @@ import {
   CheckCircle2,
   MapPin,
   Lock,
+  Code,
+  RefreshCw,
+  AlertCircle,
+  Clock,
+  LogIn,
+  Zap,
 } from 'lucide-react';
 
 import { PlanGate } from '@/components/PlanGate';
@@ -59,7 +65,8 @@ type SettingsTab =
   | 'security'
   | 'billing'
   | 'data'
-  | 'integrations';
+  | 'integrations'
+  | 'api';
 
 interface TeamMember {
   id: string;
@@ -801,6 +808,7 @@ function applyDensity(density: string) {
 
 function AppearanceTab() {
   const { theme, setTheme } = useTheme();
+  const { can } = usePlan();
 
   // ── Admin UI appearance (localStorage) ──────────────────────────────────────
   const [saved, setSaved]             = useState(false);
@@ -1069,14 +1077,20 @@ function AppearanceTab() {
                 <Field label="Portal footer text">
                   <input type="text" value={brandingForm.footerText} placeholder={`© ${new Date().getFullYear()} Your Organization · All rights reserved`} onChange={(e) => setBranding('footerText')(e.target.value)} className={inputClass} />
                 </Field>
-                <div className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg">
+                <div className={`flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg ${!can('white_labeling') ? 'opacity-60' : ''}`}>
                   <div>
-                    <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Show "Powered by VolunteerFlow"</p>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Displays a small badge in the footer of the volunteer portal</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Show "Powered by VolunteerFlow"</p>
+                      {!can('white_labeling') && <Lock className="w-3 h-3 text-neutral-400" />}
+                    </div>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                      {can('white_labeling') ? 'Displays a small badge in the footer of the volunteer portal' : 'Upgrade to Enterprise to hide the VolunteerFlow badge'}
+                    </p>
                   </div>
                   <button
-                    onClick={() => setBranding('showPoweredBy')(!brandingForm.showPoweredBy)}
-                    className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${brandingForm.showPoweredBy ? 'bg-primary-600 dark:bg-primary-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                    onClick={() => can('white_labeling') && setBranding('showPoweredBy')(!brandingForm.showPoweredBy)}
+                    disabled={!can('white_labeling')}
+                    className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${brandingForm.showPoweredBy ? 'bg-primary-600 dark:bg-primary-500' : 'bg-neutral-300 dark:bg-neutral-600'} ${!can('white_labeling') ? 'cursor-not-allowed' : ''}`}
                   >
                     <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${brandingForm.showPoweredBy ? 'translate-x-5' : ''}`} />
                   </button>
@@ -1139,6 +1153,25 @@ function SecurityTab() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
+  // SSO / SAML state
+  const { can: canSso } = usePlan();
+  type SsoProvider = 'okta' | 'azure' | 'google' | 'custom';
+  interface SsoConfig { isEnabled: boolean; provider: SsoProvider; metadataUrl: string; entityId: string; ssoUrl: string; sloUrl: string; x509Cert: string; nameIdFormat: string; attrEmail: string; attrName: string; }
+  const SSO_DEFAULTS: SsoConfig = { isEnabled: false, provider: 'custom', metadataUrl: '', entityId: '', ssoUrl: '', sloUrl: '', x509Cert: '', nameIdFormat: 'email', attrEmail: 'email', attrName: 'name' };
+  const [ssoConfig, setSsoConfig] = useState<SsoConfig>(SSO_DEFAULTS);
+  const [ssoLoading, setSsoLoading] = useState(false);
+  const [ssoSaving, setSsoSaving] = useState(false);
+  const [ssoSaved, setSsoSaved] = useState(false);
+  const [ssoError, setSsoError] = useState('');
+  const [ssoManual, setSsoManual] = useState(false);
+
+  const SSO_PROVIDERS: { value: SsoProvider; label: string; hint: string }[] = [
+    { value: 'okta',   label: 'Okta',             hint: 'Enter your Okta Metadata URL from Admin → Applications → App → Sign On → Identity Provider metadata' },
+    { value: 'azure',  label: 'Azure AD / Entra',  hint: 'Enter the App Federation Metadata URL from Azure AD → Enterprise Applications → App → Single sign-on' },
+    { value: 'google', label: 'Google Workspace',  hint: 'Download metadata from Admin Console → Apps → SAML Apps → App → Service Provider Details' },
+    { value: 'custom', label: 'Custom SAML 2.0',   hint: 'Enter your IdP metadata URL or configure fields manually' },
+  ];
+
   useEffect(() => {
     api.get<{ twoFactorEnabled: boolean; sessionTimeout: string }>('/auth/security-settings').then((d) => {
       setTwoFactor(d.twoFactorEnabled);
@@ -1148,6 +1181,11 @@ function SecurityTab() {
     api.get<ActiveSession[]>('/auth/sessions').then((d) => {
       setSessions(d);
     }).catch(() => {}).finally(() => setSessionsLoading(false));
+
+    if (canSso('sso_saml')) {
+      setSsoLoading(true);
+      api.get<{ data: SsoConfig }>('/sso').then((d) => setSsoConfig(d.data ?? SSO_DEFAULTS)).catch(() => {}).finally(() => setSsoLoading(false));
+    }
   }, []);
 
   const pwStrength = (p: string) => {
@@ -1239,6 +1277,20 @@ function SecurityTab() {
       // silent — leave session in list
     } finally {
       setRevokingId(null);
+    }
+  };
+
+  const saveSso = async () => {
+    setSsoSaving(true);
+    setSsoError('');
+    try {
+      await api.put('/sso', ssoConfig);
+      setSsoSaved(true);
+      setTimeout(() => setSsoSaved(false), 3000);
+    } catch (err: unknown) {
+      setSsoError((err as { message?: string })?.message || 'Failed to save SSO configuration.');
+    } finally {
+      setSsoSaving(false);
     }
   };
 
@@ -1482,6 +1534,167 @@ function SecurityTab() {
           </Button>
         </div>
       </Card>
+
+      {/* SSO / SAML */}
+      <PlanGate feature="sso_saml" mode="blur">
+        <Card className="p-6">
+          <div className="flex items-start gap-4 mb-6">
+            <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center flex-shrink-0">
+              <LogIn className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">SSO / SAML Integration</h2>
+                {ssoConfig.isEnabled && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400">
+                    <CheckCircle2 className="w-3 h-3" /> Enabled
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
+                Let your team sign in with Okta, Azure AD, Google Workspace, or any SAML 2.0 identity provider.
+              </p>
+            </div>
+          </div>
+
+          {ssoLoading ? (
+            <div className="flex justify-center py-8">
+              <span className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Enable SSO</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Require team members to sign in via your identity provider</p>
+                </div>
+                <button
+                  onClick={() => setSsoConfig(c => ({ ...c, isEnabled: !c.isEnabled }))}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${ssoConfig.isEnabled ? 'bg-primary-600 dark:bg-primary-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${ssoConfig.isEnabled ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {/* Provider selector */}
+              <Field label="Identity Provider">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {SSO_PROVIDERS.map((p) => (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => setSsoConfig(c => ({ ...c, provider: p.value }))}
+                      className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${ssoConfig.provider === p.value ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-600'}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+                  {SSO_PROVIDERS.find(p => p.value === ssoConfig.provider)?.hint}
+                </p>
+              </Field>
+
+              {/* Metadata URL or manual fields */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                    IdP Metadata URL <span className="text-neutral-400 font-normal">(recommended)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setSsoManual(v => !v)}
+                    className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
+                  >
+                    {ssoManual ? 'Use metadata URL' : 'Configure manually'}
+                  </button>
+                </div>
+                {!ssoManual ? (
+                  <input
+                    type="url"
+                    value={ssoConfig.metadataUrl}
+                    onChange={e => setSsoConfig(c => ({ ...c, metadataUrl: e.target.value }))}
+                    placeholder="https://your-idp.example.com/metadata.xml"
+                    className={inputClass}
+                  />
+                ) : (
+                  <div className="space-y-4 pt-1">
+                    <Field label="Entity ID / Issuer">
+                      <input type="url" value={ssoConfig.entityId} onChange={e => setSsoConfig(c => ({ ...c, entityId: e.target.value }))} placeholder="https://your-idp.example.com/issuer" className={inputClass} />
+                    </Field>
+                    <Field label="SSO URL (Single Sign-On)">
+                      <input type="url" value={ssoConfig.ssoUrl} onChange={e => setSsoConfig(c => ({ ...c, ssoUrl: e.target.value }))} placeholder="https://your-idp.example.com/sso/saml" className={inputClass} />
+                    </Field>
+                    <Field label="SLO URL (Single Logout)" hint="Optional — required for single-logout support">
+                      <input type="url" value={ssoConfig.sloUrl} onChange={e => setSsoConfig(c => ({ ...c, sloUrl: e.target.value }))} placeholder="https://your-idp.example.com/slo/saml" className={inputClass} />
+                    </Field>
+                    <Field label="x509 Certificate" hint="Paste the PEM-encoded public certificate from your IdP">
+                      <textarea
+                        rows={5}
+                        value={ssoConfig.x509Cert}
+                        onChange={e => setSsoConfig(c => ({ ...c, x509Cert: e.target.value }))}
+                        placeholder="-----BEGIN CERTIFICATE-----&#10;MIIBkTCB+wIJ...&#10;-----END CERTIFICATE-----"
+                        className={`${inputClass} resize-y font-mono text-xs`}
+                      />
+                    </Field>
+                    <Field label="NameID Format">
+                      <select value={ssoConfig.nameIdFormat} onChange={e => setSsoConfig(c => ({ ...c, nameIdFormat: e.target.value }))} className={selectClass}>
+                        <option value="email">Email Address (urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress)</option>
+                        <option value="persistent">Persistent (urn:oasis:names:tc:SAML:2.0:nameid-format:persistent)</option>
+                        <option value="transient">Transient (urn:oasis:names:tc:SAML:2.0:nameid-format:transient)</option>
+                        <option value="unspecified">Unspecified</option>
+                      </select>
+                    </Field>
+                  </div>
+                )}
+              </div>
+
+              {/* Attribute mapping */}
+              <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
+                <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Attribute Mapping</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Map SAML assertion attributes to VolunteerFlow user fields. Use the attribute name your IdP sends.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Email attribute">
+                    <input type="text" value={ssoConfig.attrEmail} onChange={e => setSsoConfig(c => ({ ...c, attrEmail: e.target.value }))} placeholder="email" className={inputClass} />
+                  </Field>
+                  <Field label="Display name attribute">
+                    <input type="text" value={ssoConfig.attrName} onChange={e => setSsoConfig(c => ({ ...c, attrName: e.target.value }))} placeholder="name" className={inputClass} />
+                  </Field>
+                </div>
+              </div>
+
+              {/* SP details (read-only) */}
+              <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 p-4 space-y-2">
+                <p className="text-xs font-semibold text-neutral-600 dark:text-neutral-400 uppercase tracking-wider mb-2">Your Service Provider (SP) Details</p>
+                {[
+                  ['ACS URL', 'https://app.volunteerflow.us/api/sso/callback'],
+                  ['Entity ID', 'https://app.volunteerflow.us'],
+                  ['Metadata URL', 'https://app.volunteerflow.us/api/sso/metadata'],
+                ].map(([label, val]) => (
+                  <div key={label} className="flex items-center gap-2">
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400 w-24 flex-shrink-0">{label}</span>
+                    <code className="text-xs bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 flex-1 truncate text-neutral-700 dark:text-neutral-300">{val}</code>
+                    <button type="button" onClick={() => navigator.clipboard.writeText(val)} className="p-1 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 flex-shrink-0"><Copy className="w-3.5 h-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+
+              {ssoError && (
+                <p className="flex items-center gap-2 text-sm text-danger-600 dark:text-danger-400 bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />{ssoError}
+                </p>
+              )}
+
+              <div className="flex items-center gap-3 pt-1">
+                <Button onClick={saveSso} disabled={ssoSaving} className="flex items-center gap-2">
+                  {ssoSaving ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving…</> : ssoSaved ? <><Check className="w-4 h-4" />Saved</> : 'Save SSO Configuration'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      </PlanGate>
     </div>
   );
 }
@@ -2963,6 +3176,200 @@ function LocationsTab() {
   );
 }
 
+// ─── Tab: API Access ──────────────────────────────────────────────────────────
+
+interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  isActive: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+function ApiAccessTab() {
+  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get<{ data: ApiKey[] }>('/developer/keys')
+      .then((res) => setKeys((res as any).data ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleCreate = async () => {
+    if (!newKeyName.trim()) return;
+    setCreating(true);
+    try {
+      const res = await api.post<{ data: ApiKey & { rawKey: string } }>('/developer/keys', { name: newKeyName.trim() });
+      const created = (res as any).data;
+      setKeys((prev) => [{ id: created.id, name: created.name, keyPrefix: created.keyPrefix, isActive: created.isActive, createdAt: created.createdAt, lastUsedAt: null }, ...prev]);
+      setNewlyCreatedKey(created.rawKey);
+      setNewKeyName('');
+      setShowForm(false);
+    } catch {
+      // ignore
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleRevoke = async (id: string) => {
+    if (!confirm('Revoke this API key? Any integrations using it will stop working immediately.')) return;
+    setRevoking(id);
+    try {
+      await api.delete(`/developer/keys/${id}`);
+      setKeys((prev) => prev.filter((k) => k.id !== id));
+    } catch {
+      // ignore
+    } finally {
+      setRevoking(null);
+    }
+  };
+
+  const handleCopy = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://yourapp.com';
+
+  return (
+    <div className="space-y-6">
+      {/* Newly created key banner */}
+      {newlyCreatedKey && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">Copy your API key now — it won&apos;t be shown again</p>
+              <div className="flex items-center gap-2 mt-2">
+                <code className="flex-1 text-xs font-mono bg-white dark:bg-neutral-800 border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-2 text-neutral-800 dark:text-neutral-200 truncate">
+                  {newlyCreatedKey}
+                </code>
+                <button
+                  onClick={() => handleCopy(newlyCreatedKey)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors shrink-0"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+                <button onClick={() => setNewlyCreatedKey(null)} className="p-2 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* API Keys list */}
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <Code className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+            <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">API Keys</h2>
+          </div>
+          {!showForm && (
+            <Button size="sm" onClick={() => setShowForm(true)}>
+              <Plus className="w-4 h-4 mr-1.5" /> New Key
+            </Button>
+          )}
+        </div>
+
+        {showForm && (
+          <div className="flex items-center gap-2 mb-5 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-700">
+            <input
+              type="text"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              placeholder="Key name (e.g. Production, Zapier)"
+              className="flex-1 px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
+              autoFocus
+            />
+            <Button size="sm" onClick={handleCreate} disabled={creating || !newKeyName.trim()}>
+              {creating ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Generate'}
+            </Button>
+            <button onClick={() => { setShowForm(false); setNewKeyName(''); }} className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-500">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : keys.length === 0 ? (
+          <div className="text-center py-10">
+            <KeyRound className="w-8 h-8 text-neutral-300 dark:text-neutral-600 mx-auto mb-2" />
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">No API keys yet. Generate one to get started.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {keys.map((key) => (
+              <div key={key.id} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-700/50">
+                <KeyRound className="w-4 h-4 text-neutral-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">{key.name}</p>
+                  <p className="text-xs font-mono text-neutral-400 dark:text-neutral-500 mt-0.5">{key.keyPrefix}</p>
+                </div>
+                <div className="text-right text-xs text-neutral-400 dark:text-neutral-500 shrink-0">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {key.lastUsedAt
+                      ? `Last used ${new Date(key.lastUsedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                      : 'Never used'}
+                  </div>
+                  <div className="mt-0.5">
+                    Created {new Date(key.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRevoke(key.id)}
+                  disabled={revoking === key.id}
+                  className="p-2 rounded-lg text-neutral-400 hover:text-danger-600 hover:bg-danger-50 dark:hover:bg-danger-900/20 transition-colors disabled:opacity-50"
+                  title="Revoke key"
+                >
+                  {revoking === key.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Authentication reference */}
+      <Card className="p-6">
+        <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-4 flex items-center gap-2">
+          <Code className="w-4 h-4 text-neutral-400" /> Authentication
+        </h3>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
+          Pass your API key as a Bearer token in the <code className="text-xs bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded">Authorization</code> header on every request.
+        </p>
+        <div className="rounded-lg bg-neutral-900 dark:bg-neutral-950 p-4 text-xs font-mono text-neutral-100 space-y-1 overflow-x-auto">
+          <div><span className="text-neutral-400"># Base URL</span></div>
+          <div className="text-green-400">{baseUrl}/api</div>
+          <div className="mt-3"><span className="text-neutral-400"># Example request</span></div>
+          <div><span className="text-blue-400">curl</span> {baseUrl}/api/volunteers \</div>
+          <div className="pl-4"><span className="text-yellow-400">-H</span> <span className="text-amber-300">&quot;Authorization: Bearer vf_live_...&quot;</span></div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Tab: Integrations ────────────────────────────────────────────────────────
+
 function IntegrationsTab() {
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
@@ -3126,6 +3533,7 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Building2; featureKey
   { id: 'billing',      label: 'Billing',        icon: CreditCard    },
   { id: 'data',         label: 'Data & Privacy', icon: Database      },
   { id: 'integrations', label: 'Integrations',   icon: Puzzle        },
+  { id: 'api',          label: 'API Access',     icon: Code,          featureKey: 'api_access' },
 ];
 
 export default function Settings() {
@@ -3145,6 +3553,7 @@ export default function Settings() {
       case 'billing':       return <BillingTab />;
       case 'data':          return <DataTab />;
       case 'integrations':  return <IntegrationsTab />;
+      case 'api':           return <ApiAccessTab />;
     }
   };
 

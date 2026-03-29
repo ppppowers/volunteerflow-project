@@ -546,6 +546,42 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_audit_logs_user_name ON audit_logs(user_name);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_verb      ON audit_logs(verb);
 
+  -- ── REST API keys (enterprise) ───────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id           TEXT        PRIMARY KEY,
+    org_id       TEXT        NOT NULL,
+    name         TEXT        NOT NULL DEFAULT '',
+    key_hash     TEXT        NOT NULL,
+    key_prefix   TEXT        NOT NULL,
+    is_active    BOOLEAN     NOT NULL DEFAULT true,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_api_keys_org_id ON api_keys(org_id);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_hash   ON api_keys(key_hash);
+
+  -- ── SSO / SAML configuration (enterprise) ────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS sso_configs (
+    id              TEXT        PRIMARY KEY,
+    org_id          TEXT        NOT NULL UNIQUE,
+    is_enabled      BOOLEAN     NOT NULL DEFAULT false,
+    provider        TEXT        NOT NULL DEFAULT 'custom',
+    metadata_url    TEXT        NOT NULL DEFAULT '',
+    entity_id       TEXT        NOT NULL DEFAULT '',
+    sso_url         TEXT        NOT NULL DEFAULT '',
+    slo_url         TEXT        NOT NULL DEFAULT '',
+    x509_cert       TEXT        NOT NULL DEFAULT '',
+    name_id_format  TEXT        NOT NULL DEFAULT 'email',
+    attr_email      TEXT        NOT NULL DEFAULT 'email',
+    attr_name       TEXT        NOT NULL DEFAULT 'name',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_sso_configs_org_id ON sso_configs(org_id);
+
+  -- ── Leader / captain user type (enterprise) ──────────────────────────────────
+  ALTER TABLE volunteers           ADD COLUMN IF NOT EXISTS is_leader BOOLEAN NOT NULL DEFAULT false;
+
   -- ── Location columns (multi-location support) ────────────────────────────────
   ALTER TABLE users                ADD COLUMN IF NOT EXISTS location_id TEXT;
   ALTER TABLE users                ADD COLUMN IF NOT EXISTS location_restricted BOOLEAN NOT NULL DEFAULT false;
@@ -662,6 +698,16 @@ async function seedJobNotifRules(client) {
       `INSERT INTO job_notif_rules (id, org_id, event, label, description, grp, volunteer_channel, leader_channel, admin_channel)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (org_id, event) DO NOTHING`,
       [`jnr_${r.event}`, 'admin-1', r.event, r.label, r.description, r.grp, r.volunteerChannel, r.leaderChannel, r.adminChannel]
+    );
+  }
+}
+
+async function seedJobNotifRulesForOrg(pool, orgId) {
+  for (const r of JOB_NOTIF_RULES_SEED) {
+    await pool.query(
+      `INSERT INTO job_notif_rules (id, org_id, event, label, description, grp, volunteer_channel, leader_channel, admin_channel)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (org_id, event) DO NOTHING`,
+      [`jnr_${r.event}_${orgId}`, orgId, r.event, r.label, r.description, r.grp, r.volunteerChannel, r.leaderChannel, r.adminChannel]
     );
   }
 }
@@ -1007,4 +1053,4 @@ async function loadStaffSchema(client) {
 // initializeDatabase is the canonical startup function (alias kept for compatibility)
 const initializeDatabase = initDb;
 
-module.exports = { pool, initDb, initializeDatabase, seedOrgMessageTemplates };
+module.exports = { pool, initDb, initializeDatabase, seedOrgMessageTemplates, seedJobNotifRulesForOrg };

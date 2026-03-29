@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
+import { PlanGate } from '@/components/PlanGate';
 import { api } from '@/lib/api';
 import {
   ScrollText,
@@ -233,6 +234,7 @@ export default function AuditPage() {
   return (
     <Layout>
       <Head><title>Audit Log — VolunteerFlow</title></Head>
+      <PlanGate feature="audit_logs">
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -539,6 +541,7 @@ export default function AuditPage() {
           </div>
         )}
       </div>
+      </PlanGate>
     </Layout>
   );
 }

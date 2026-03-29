@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import Head from 'next/head';
 import Layout from '@/components/Layout';
+import { PlanGate } from '@/components/PlanGate';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import {
@@ -342,6 +343,7 @@ export default function BadgesPage() {
   return (
     <Layout>
       <Head><title>Badges — VolunteerFlow</title></Head>
+      <PlanGate feature="credentials_badges">
       <div className="p-6 max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
@@ -518,6 +520,7 @@ export default function BadgesPage() {
           {toast}
         </div>
       )}
+      </PlanGate>
     </Layout>
   );
 }

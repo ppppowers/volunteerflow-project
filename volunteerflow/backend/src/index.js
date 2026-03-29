@@ -53,7 +53,7 @@ const Stripe = require('stripe');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-const { pool, initializeDatabase, seedOrgMessageTemplates } = require('./db');
+const { pool, initializeDatabase, seedOrgMessageTemplates, seedJobNotifRulesForOrg } = require('./db');
 const { dispatchBulk, dispatchJobNotif, buildFrom, sendEmail } = require('./mailer');
 const createStaffRouter = require('./staff/index');
 
@@ -182,8 +182,33 @@ async function requireAuth(req, res, next) {
   if (!h || !h.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
+  const token = h.slice(7);
+
+  // API key authentication (enterprise REST API access)
+  if (token.startsWith('vf_live_')) {
+    try {
+      const keyHash = crypto.createHash('sha256').update(token).digest('hex');
+      const { rows } = await pool.query(
+        'SELECT * FROM api_keys WHERE key_hash = $1 AND is_active = true',
+        [keyHash]
+      );
+      if (!rows.length) return res.status(401).json({ success: false, error: 'Invalid or revoked API key' });
+      const key = rows[0];
+      // Update last_used_at non-blocking
+      setImmediate(() =>
+        pool.query('UPDATE api_keys SET last_used_at = NOW() WHERE id = $1', [key.id]).catch(() => {})
+      );
+      req.user = { sub: key.org_id, orgId: key.org_id, role: 'api', name: `API: ${key.name}` };
+      req.orgId = key.org_id;
+      req.locationFilter = null;
+      return next();
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+
   try {
-    req.user = jwt.verify(h.slice(7), JWT_SECRET);
+    req.user = jwt.verify(token, JWT_SECRET);
     req.orgId = req.user.orgId ?? req.user.sub;
     // Location filter: restricted users can only see their assigned location
     req.locationFilter = (req.user.locationRestricted && req.user.locationId) ? req.user.locationId : null;
@@ -283,6 +308,7 @@ function mapVolunteer(r) {
     hoursContributed: r.hours_contributed,
     status: r.status,
     locationId: r.location_id ?? null,
+    isLeader: r.is_leader ?? false,
   };
 }
 
@@ -1362,6 +1388,25 @@ app.put('/api/volunteers/:id', requireAuth, async (req, res) => {
   }
 });
 
+app.patch('/api/volunteers/:id/leader', requireAuth, requirePlan('enterprise'), async (req, res) => {
+  try {
+    const { isLeader } = req.body;
+    if (typeof isLeader !== 'boolean') return res.status(400).json({ success: false, error: 'isLeader must be a boolean' });
+    const { rows } = await pool.query(
+      'UPDATE volunteers SET is_leader = $1 WHERE id = $2 AND org_id = $3 RETURNING *',
+      [isLeader, req.params.id, req.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Volunteer not found' });
+    logAudit({ req, category: 'volunteer', verb: 'updated',
+      resource: `${rows[0].first_name} ${rows[0].last_name}`,
+      detail: isLeader ? 'Designated as leader/captain' : 'Removed leader/captain designation' });
+    res.json({ success: true, data: mapVolunteer(rows[0]) });
+  } catch (err) {
+    console.error('PATCH /api/volunteers/:id/leader error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to update leader status' });
+  }
+});
+
 app.delete('/api/volunteers/:id', requireAuth, async (req, res) => {
   try {
     const { rows: volRows } = await pool.query('SELECT first_name, last_name FROM volunteers WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
@@ -2023,6 +2068,7 @@ app.post('/api/applications', requireAuth, requirePlan('grow'), async (req, res)
       }).catch(() => {});
     // Fire application_received notification (non-blocking)
     dispatchJobNotif(pool, 'application_received', {
+      orgId: req.orgId,
       volunteerId,
       subject: 'Application received',
       body: 'Thank you for applying! We will review your application and be in touch soon.',
@@ -2076,6 +2122,7 @@ app.put('/api/applications/:id', requireAuth, requirePlan('grow'), async (req, r
         : updates.status === 'REJECTED' ? 'application_rejected' : null;
       if (notifEvent) {
         dispatchJobNotif(pool, notifEvent, {
+          orgId: req.orgId,
           volunteerId: existing.rows[0].volunteer_id,
         }).catch(() => {});
       }
@@ -3552,10 +3599,13 @@ const PORTAL_TYPES = new Set(['volunteer', 'member', 'employee']);
 
 function mapPortalSettings(row) {
   return {
-    portalType: row.portal_type,
-    themeId:    row.theme_id,
-    customHtml: row.custom_html,
-    useCustom:  row.use_custom,
+    portalType:    row.portal_type,
+    themeId:       row.theme_id,
+    customHtml:    row.custom_html,
+    useCustom:     row.use_custom,
+    portalName:    row.portal_name    || '',
+    showPoweredBy: row.show_powered_by !== false,
+    logoBase64:    row.logo_base64    || '',
   };
 }
 
@@ -3624,10 +3674,13 @@ app.get('/api/portal/settings/:type', async (req, res) => {
   if (!PORTAL_TYPES.has(type)) return res.status(400).json({ error: 'Invalid portal type' });
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM portal_settings WHERE portal_type = $1',
+      `SELECT ps.*, os.portal_name, os.show_powered_by, os.logo_base64
+       FROM portal_settings ps
+       LEFT JOIN org_settings os ON os.id = ps.org_id
+       WHERE ps.portal_type = $1 LIMIT 1`,
       [type]
     );
-    if (!rows.length) return res.json({ portalType: type, themeId: 'default', customHtml: '', useCustom: false });
+    if (!rows.length) return res.json({ portalType: type, themeId: 'default', customHtml: '', useCustom: false, portalName: '', showPoweredBy: true, logoBase64: '' });
     res.json(mapPortalSettings(rows[0]));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4324,9 +4377,14 @@ app.put('/api/branding', requireAuth, requirePlan('grow'), writeLimiter, async (
       welcomeHeading: String(welcomeHeading).trim().slice(0, 200),
       welcomeSubtext: String(welcomeSubtext).trim().slice(0, 500),
       footerText:     String(footerText).trim().slice(0, 300),
-      showPoweredBy:  Boolean(showPoweredBy),
       logoBase64:     String(logoBase64).slice(0, 500000),
     };
+    // Enforce enterprise-only: non-enterprise orgs cannot hide the powered-by badge
+    if (!cleaned.showPoweredBy) {
+      const { rows: planRows } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.sub]);
+      const plan = planRows[0]?.plan ?? 'discover';
+      if (plan !== 'enterprise') cleaned.showPoweredBy = true;
+    }
     await pool.query(
       `INSERT INTO org_settings (id, portal_name, portal_subdomain, brand_primary, brand_accent,
          welcome_heading, welcome_subtext, footer_text, show_powered_by, logo_base64, updated_at)
@@ -4800,23 +4858,34 @@ app.delete('/api/messages/login-notifications/:id', requireAuth, async (req, res
 
 // ── Job Notification Rules ────────────────────────────────────────────────────
 
-app.get('/api/messages/notif-rules', requireAuth, async (req, res) => {
+app.get('/api/messages/notif-rules', requireAuth, requirePlan('enterprise'), async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM job_notif_rules ORDER BY id ASC');
+    let { rows } = await pool.query(
+      'SELECT * FROM job_notif_rules WHERE org_id = $1 ORDER BY id ASC',
+      [req.orgId]
+    );
+    // Auto-seed default rules for this org on first access
+    if (!rows.length) {
+      await seedJobNotifRulesForOrg(pool, req.orgId);
+      ({ rows } = await pool.query(
+        'SELECT * FROM job_notif_rules WHERE org_id = $1 ORDER BY id ASC',
+        [req.orgId]
+      ));
+    }
     res.json(rows.map(mapNotifRule));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.put('/api/messages/notif-rules', requireAuth, async (req, res) => {
+app.put('/api/messages/notif-rules', requireAuth, requirePlan('enterprise'), async (req, res) => {
   const rules = req.body;
   if (!Array.isArray(rules)) return res.status(400).json({ error: 'expected array' });
   try {
     for (const r of rules) {
       await pool.query(
-        `UPDATE job_notif_rules SET volunteer_channel=$1, leader_channel=$2, admin_channel=$3 WHERE event=$4`,
-        [r.volunteerChannel || 'none', r.leaderChannel || 'none', r.adminChannel || 'none', r.event]
+        `UPDATE job_notif_rules SET volunteer_channel=$1, leader_channel=$2, admin_channel=$3 WHERE event=$4 AND org_id=$5`,
+        [r.volunteerChannel || 'none', r.leaderChannel || 'none', r.adminChannel || 'none', r.event, req.orgId]
       );
     }
     logAudit({ req, category: 'settings', verb: 'updated', resource: 'Notification Rules', detail: '' });
@@ -4836,6 +4905,132 @@ app.get('/api/events/:id/volunteer-count', requireAuth, async (req, res) => {
     res.json({ count: parseInt(rows[0].count, 10) });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ===== REST API KEYS =====
+
+function mapApiKey(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    keyPrefix: r.key_prefix,
+    isActive: r.is_active,
+    createdAt: r.created_at,
+    lastUsedAt: r.last_used_at ?? null,
+  };
+}
+
+app.get('/api/developer/keys', requireAuth, requirePlan('enterprise'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC',
+      [req.orgId]
+    );
+    res.json({ success: true, data: rows.map(mapApiKey) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/developer/keys', requireAuth, requirePlan('enterprise'), async (req, res) => {
+  try {
+    const name = String(req.body.name || '').slice(0, 80).trim() || 'Unnamed Key';
+    const rawKey = `vf_live_${crypto.randomBytes(24).toString('hex')}`;
+    const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+    const keyPrefix = rawKey.slice(0, 16) + '…';
+    const id = `ak_${crypto.randomUUID()}`;
+    const { rows } = await pool.query(
+      `INSERT INTO api_keys (id, org_id, name, key_hash, key_prefix, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, true, NOW()) RETURNING *`,
+      [id, req.orgId, name, keyHash, keyPrefix]
+    );
+    logAudit({ req, category: 'settings', verb: 'created', resource: 'API Key', detail: `Created key "${name}"` });
+    res.status(201).json({ success: true, data: { ...mapApiKey(rows[0]), rawKey } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/developer/keys/:id', requireAuth, requirePlan('enterprise'), async (req, res) => {
+  try {
+    const { rowCount, rows } = await pool.query(
+      'DELETE FROM api_keys WHERE id = $1 AND org_id = $2 RETURNING name',
+      [req.params.id, req.orgId]
+    );
+    if (!rowCount) return res.status(404).json({ success: false, error: 'API key not found' });
+    logAudit({ req, category: 'settings', verb: 'deleted', resource: 'API Key', detail: `Revoked key "${rows[0].name}"` });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ===== SSO / SAML =====
+
+app.get('/api/sso', requireAuth, requirePlan('enterprise'), async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM sso_configs WHERE org_id = $1', [req.orgId]);
+    if (!rows.length) {
+      return res.json({ success: true, data: { isEnabled: false, provider: 'custom', metadataUrl: '', entityId: '', ssoUrl: '', sloUrl: '', x509Cert: '', nameIdFormat: 'email', attrEmail: 'email', attrName: 'name' } });
+    }
+    const r = rows[0];
+    res.json({ success: true, data: {
+      isEnabled:    r.is_enabled,
+      provider:     r.provider,
+      metadataUrl:  r.metadata_url,
+      entityId:     r.entity_id,
+      ssoUrl:       r.sso_url,
+      sloUrl:       r.slo_url,
+      x509Cert:     r.x509_cert,
+      nameIdFormat: r.name_id_format,
+      attrEmail:    r.attr_email,
+      attrName:     r.attr_name,
+    }});
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/sso', requireAuth, requirePlan('enterprise'), writeLimiter, async (req, res) => {
+  const {
+    isEnabled = false, provider = 'custom',
+    metadataUrl = '', entityId = '', ssoUrl = '', sloUrl = '', x509Cert = '',
+    nameIdFormat = 'email', attrEmail = 'email', attrName = 'name',
+  } = req.body;
+  const ALLOWED_PROVIDERS = ['okta', 'azure', 'google', 'custom'];
+  const ALLOWED_FORMATS   = ['email', 'persistent', 'transient', 'unspecified'];
+  const cleaned = {
+    isEnabled:    Boolean(isEnabled),
+    provider:     ALLOWED_PROVIDERS.includes(provider) ? provider : 'custom',
+    metadataUrl:  String(metadataUrl).trim().slice(0, 2000),
+    entityId:     String(entityId).trim().slice(0, 2000),
+    ssoUrl:       String(ssoUrl).trim().slice(0, 2000),
+    sloUrl:       String(sloUrl).trim().slice(0, 2000),
+    x509Cert:     String(x509Cert).trim().slice(0, 8000),
+    nameIdFormat: ALLOWED_FORMATS.includes(nameIdFormat) ? nameIdFormat : 'email',
+    attrEmail:    String(attrEmail).trim().slice(0, 200),
+    attrName:     String(attrName).trim().slice(0, 200),
+  };
+  try {
+    await pool.query(
+      `INSERT INTO sso_configs (id, org_id, is_enabled, provider, metadata_url, entity_id, sso_url, slo_url, x509_cert, name_id_format, attr_email, attr_name, updated_at)
+       VALUES ($11, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $12, NOW())
+       ON CONFLICT (org_id) DO UPDATE SET
+         is_enabled=EXCLUDED.is_enabled, provider=EXCLUDED.provider,
+         metadata_url=EXCLUDED.metadata_url, entity_id=EXCLUDED.entity_id,
+         sso_url=EXCLUDED.sso_url, slo_url=EXCLUDED.slo_url,
+         x509_cert=EXCLUDED.x509_cert, name_id_format=EXCLUDED.name_id_format,
+         attr_email=EXCLUDED.attr_email, attr_name=EXCLUDED.attr_name,
+         updated_at=NOW()`,
+      [req.orgId, cleaned.isEnabled, cleaned.provider, cleaned.metadataUrl, cleaned.entityId,
+       cleaned.ssoUrl, cleaned.sloUrl, cleaned.x509Cert, cleaned.nameIdFormat,
+       cleaned.attrEmail, `sso_${req.orgId}`, cleaned.attrName]
+    );
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'SSO', detail: `SSO ${cleaned.isEnabled ? 'enabled' : 'updated'} (${cleaned.provider})` });
+    res.json({ success: true, data: cleaned });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

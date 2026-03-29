@@ -155,13 +155,13 @@ async function dispatchBulk(channel, recipients, subject, body, emailFrom) {
  *
  * @param {import('pg').Pool} pool
  * @param {string} eventName        e.g. 'application_approved'
- * @param {{ volunteerId?: string, subject?: string, body?: string }} data
+ * @param {{ orgId?: string, volunteerId?: string, subject?: string, body?: string }} data
  */
 async function dispatchJobNotif(pool, eventName, data = {}) {
   try {
     const { rows: rules } = await pool.query(
-      'SELECT * FROM job_notif_rules WHERE event = $1',
-      [eventName]
+      'SELECT * FROM job_notif_rules WHERE event = $1 AND org_id = $2',
+      [eventName, data.orgId || 'admin-1']
     );
     if (!rules.length) return;
 

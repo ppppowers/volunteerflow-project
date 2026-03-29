@@ -186,6 +186,21 @@ export default function ApplyPage() {
 
   const accent = accentMap[type];
 
+  const [portalName, setPortalName] = useState('');
+  const [showPoweredBy, setShowPoweredBy] = useState(true);
+
+  useEffect(() => {
+    const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/$/, '');
+    fetch(`${apiBase}/portal/settings/volunteer`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d) => {
+        if (!d) return;
+        if (d.portalName) setPortalName(d.portalName);
+        setShowPoweredBy(d.showPoweredBy !== false);
+      })
+      .catch(() => {});
+  }, []);
+
   // Load config from localStorage (falls back to module defaults)
   const [config, setConfig] = useState(() => getFormConfig('master'));
 
@@ -270,8 +285,10 @@ export default function ApplyPage() {
       {/* Top bar */}
       <header className="p-5 flex items-center justify-between max-w-3xl mx-auto w-full">
         <div className="flex items-center gap-2.5">
-          <img src="/vf-logo.png" className="w-12 h-12" alt="" aria-hidden="true" />
-          <span className="text-white font-bold text-lg">VolunteerFlow</span>
+          <div className="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold text-sm">{(portalName || 'V')[0].toUpperCase()}</span>
+          </div>
+          <span className="text-white font-bold text-lg">{portalName || 'VolunteerFlow'}</span>
         </div>
         <button
           onClick={() => {
@@ -371,6 +388,11 @@ export default function ApplyPage() {
           )}
         </div>
       </main>
+      {showPoweredBy && (
+        <div className="py-4 text-center text-xs text-white/50">
+          Powered by <span className="font-semibold text-white/70">VolunteerFlow</span>
+        </div>
+      )}
     </div>
   );
 }

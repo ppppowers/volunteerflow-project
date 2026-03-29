@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Head from 'next/head';
 import { api, ApiError } from '@/lib/api';
+import { PlanGate } from '@/components/PlanGate';
 import Layout from '@/components/Layout';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -392,6 +393,7 @@ function ShiftRow({
         </button>
 
         {showPerms && (
+          <PlanGate feature="shift_permissions" mode="blur">
           <div className="mt-2 p-3 bg-neutral-50 dark:bg-neutral-700/40 rounded-lg space-y-2 border border-neutral-200 dark:border-neutral-700">
             {([
               { key: 'allowSelfSignup', label: 'Allow volunteers to self-signup' },
@@ -415,6 +417,7 @@ function ShiftRow({
               </label>
             ))}
           </div>
+          </PlanGate>
         )}
       </div>
     </div>
@@ -1231,6 +1234,7 @@ export default function Events() {
           </Field>
 
           {/* Lead */}
+          <PlanGate feature="leader_user_type" mode="blur">
           <div className="border-t border-neutral-100 dark:border-neutral-700 pt-4">
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -1334,6 +1338,7 @@ export default function Events() {
               </Field>
             </div>
           </div>
+          </PlanGate>
         </BuilderSection>
 
         {/* ── Section 2: Images ─────────────────────────────────────────────── */}
