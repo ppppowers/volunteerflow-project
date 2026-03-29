@@ -201,6 +201,25 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_applications_org_id ON applications(org_id);
 
+  -- ── Volunteer hours log ───────────────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS volunteer_hours_log (
+    id           TEXT        PRIMARY KEY,
+    org_id       TEXT        NOT NULL DEFAULT 'admin-1',
+    volunteer_id TEXT        NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
+    event_id     TEXT        REFERENCES events(id) ON DELETE SET NULL,
+    date         DATE        NOT NULL,
+    hours_logged DECIMAL(6,2) NOT NULL,
+    check_in     TEXT        NOT NULL DEFAULT '',
+    check_out    TEXT        NOT NULL DEFAULT '',
+    status       TEXT        NOT NULL DEFAULT 'confirmed',
+    notes        TEXT        NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_hours_log_org_id ON volunteer_hours_log(org_id);
+  CREATE INDEX IF NOT EXISTS idx_hours_log_volunteer ON volunteer_hours_log(volunteer_id);
+  CREATE INDEX IF NOT EXISTS idx_hours_log_date ON volunteer_hours_log(date);
+
   -- ── File storage ──────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS folders (
     id         TEXT        PRIMARY KEY,

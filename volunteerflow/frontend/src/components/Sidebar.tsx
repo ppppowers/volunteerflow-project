@@ -19,6 +19,8 @@ import {
   Terminal,
   QrCode,
   HelpCircle,
+  Clock,
+  BarChart2,
 } from 'lucide-react';
 
 const navigation = [
@@ -30,6 +32,8 @@ const navigation = [
   { name: 'Files', href: '/files', icon: Folder },
   { name: 'Training', href: '/training', icon: GraduationCap },
   { name: 'QR Codes', href: '/qr', icon: QrCode },
+  { name: 'Hours', href: '/hours', icon: Clock },
+  { name: 'Grant Report', href: '/grant-report', icon: BarChart2 },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'Portal Designer', href: '/portal', icon: Globe },
   { name: 'Audit Log', href: '/audit', icon: ScrollText },

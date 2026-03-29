@@ -1363,6 +1363,164 @@ app.delete('/api/volunteers/:id', requireAuth, async (req, res) => {
   }
 });
 
+// ===== HOURS LOG =====
+
+app.get('/api/hours', requireAuth, async (req, res) => {
+  try {
+    const { from, to, volunteer_id, event_id, status } = req.query;
+    const conditions = ['h.org_id = $1'];
+    const params = [req.orgId];
+    let idx = 2;
+    if (from)         { conditions.push(`h.date >= $${idx++}`); params.push(from); }
+    if (to)           { conditions.push(`h.date <= $${idx++}`); params.push(to); }
+    if (volunteer_id) { conditions.push(`h.volunteer_id = $${idx++}`); params.push(volunteer_id); }
+    if (event_id)     { conditions.push(`h.event_id = $${idx++}`); params.push(event_id); }
+    if (status)       { conditions.push(`h.status = $${idx++}`); params.push(status); }
+
+    const { rows } = await pool.query(`
+      SELECT h.*,
+        v.first_name || ' ' || v.last_name AS volunteer_name,
+        v.avatar AS volunteer_avatar,
+        e.title AS event_name,
+        e.category AS event_category
+      FROM volunteer_hours_log h
+      JOIN volunteers v ON v.id = h.volunteer_id
+      LEFT JOIN events e ON e.id = h.event_id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY h.date DESC, h.created_at DESC
+    `, params);
+    res.json({ hours: rows });
+  } catch (err) {
+    console.error('GET /api/hours error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch hours' });
+  }
+});
+
+app.post('/api/hours', requireAuth, async (req, res) => {
+  try {
+    const { volunteer_id, event_id, date, hours_logged, check_in, check_out, status, notes } = req.body;
+    if (!volunteer_id || !date || !hours_logged) {
+      return res.status(400).json({ success: false, error: 'volunteer_id, date, and hours_logged are required' });
+    }
+    const id = `h_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const { rows } = await pool.query(`
+      INSERT INTO volunteer_hours_log (id, org_id, volunteer_id, event_id, date, hours_logged, check_in, check_out, status, notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+    `, [id, req.orgId, volunteer_id, event_id || null, date, hours_logged, check_in || '', check_out || '', status || 'confirmed', notes || '']);
+
+    // Update volunteer aggregate
+    await pool.query(
+      'UPDATE volunteers SET hours_contributed = hours_contributed + $1 WHERE id = $2 AND org_id = $3',
+      [parseFloat(hours_logged), volunteer_id, req.orgId]
+    );
+    res.json({ success: true, entry: rows[0] });
+  } catch (err) {
+    console.error('POST /api/hours error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to log hours' });
+  }
+});
+
+app.put('/api/hours/:id', requireAuth, async (req, res) => {
+  try {
+    const { event_id, date, hours_logged, check_in, check_out, status, notes } = req.body;
+    const { rows: old } = await pool.query(
+      'SELECT hours_logged, volunteer_id FROM volunteer_hours_log WHERE id = $1 AND org_id = $2',
+      [req.params.id, req.orgId]
+    );
+    if (!old.length) return res.status(404).json({ success: false, error: 'Entry not found' });
+
+    const { rows } = await pool.query(`
+      UPDATE volunteer_hours_log SET
+        event_id=$1, date=$2, hours_logged=$3, check_in=$4, check_out=$5, status=$6, notes=$7
+      WHERE id=$8 AND org_id=$9 RETURNING *
+    `, [event_id || null, date, hours_logged, check_in || '', check_out || '', status || 'confirmed', notes || '', req.params.id, req.orgId]);
+
+    // Adjust volunteer aggregate
+    const diff = parseFloat(hours_logged) - parseFloat(old[0].hours_logged);
+    if (diff !== 0) {
+      await pool.query(
+        'UPDATE volunteers SET hours_contributed = GREATEST(0, hours_contributed + $1) WHERE id = $2 AND org_id = $3',
+        [diff, old[0].volunteer_id, req.orgId]
+      );
+    }
+    res.json({ success: true, entry: rows[0] });
+  } catch (err) {
+    console.error('PUT /api/hours/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to update hours entry' });
+  }
+});
+
+app.delete('/api/hours/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'DELETE FROM volunteer_hours_log WHERE id = $1 AND org_id = $2 RETURNING volunteer_id, hours_logged',
+      [req.params.id, req.orgId]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Entry not found' });
+    await pool.query(
+      'UPDATE volunteers SET hours_contributed = GREATEST(0, hours_contributed - $1) WHERE id = $2 AND org_id = $3',
+      [parseFloat(rows[0].hours_logged), rows[0].volunteer_id, req.orgId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/hours/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to delete hours entry' });
+  }
+});
+
+// Grant report — aggregated hours summary for a date range
+app.get('/api/hours/report', requireAuth, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const conditions = ['h.org_id = $1', "h.status = 'confirmed'"];
+    const params = [req.orgId];
+    let idx = 2;
+    if (from) { conditions.push(`h.date >= $${idx++}`); params.push(from); }
+    if (to)   { conditions.push(`h.date <= $${idx++}`); params.push(to); }
+    const where = conditions.join(' AND ');
+
+    const [summaryRes, byVolunteerRes, byCategoryRes, orgRes] = await Promise.all([
+      pool.query(`SELECT SUM(h.hours_logged) AS total_hours, COUNT(DISTINCT h.volunteer_id) AS unique_volunteers, COUNT(*) AS total_sessions FROM volunteer_hours_log h WHERE ${where}`, params),
+      pool.query(`
+        SELECT v.id, v.first_name || ' ' || v.last_name AS name, v.email, v.avatar,
+          SUM(h.hours_logged) AS total_hours,
+          COUNT(DISTINCT h.event_id) AS events_attended,
+          json_agg(json_build_object('event', e.title, 'category', e.category, 'date', h.date, 'hours', h.hours_logged) ORDER BY h.date) AS sessions
+        FROM volunteer_hours_log h
+        JOIN volunteers v ON v.id = h.volunteer_id
+        LEFT JOIN events e ON e.id = h.event_id
+        WHERE ${where}
+        GROUP BY v.id, v.first_name, v.last_name, v.email, v.avatar
+        ORDER BY total_hours DESC
+      `, params),
+      pool.query(`
+        SELECT COALESCE(e.category, 'Uncategorized') AS category,
+          SUM(h.hours_logged) AS total_hours,
+          COUNT(DISTINCT h.volunteer_id) AS volunteers
+        FROM volunteer_hours_log h
+        LEFT JOIN events e ON e.id = h.event_id
+        WHERE ${where}
+        GROUP BY COALESCE(e.category, 'Uncategorized')
+        ORDER BY total_hours DESC
+      `, params),
+      pool.query('SELECT org_name, logo_url, logo_base64, address, org_email, phone, tax_id FROM org_settings WHERE id = $1', [req.orgId]),
+    ]);
+
+    res.json({
+      org: orgRes.rows[0] || {},
+      summary: summaryRes.rows[0],
+      by_volunteer: byVolunteerRes.rows,
+      by_category: byCategoryRes.rows,
+      generated_at: new Date().toISOString(),
+      date_range: { from: from || null, to: to || null },
+    });
+  } catch (err) {
+    console.error('GET /api/hours/report error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to generate report' });
+  }
+});
+
 // ===== EVENTS CRUD =====
 const EVENTS_LIST_SQL = `
   SELECT e.*,
