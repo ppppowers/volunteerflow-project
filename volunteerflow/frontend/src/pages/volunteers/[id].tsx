@@ -304,6 +304,7 @@ export default function VolunteerDetail() {
   const certStats = { total: certTemplates.length, granted: certTemplates.filter(t => getCertStatus(t.id)).length };
 
   return (
+    <>
     <Layout>
       <div className="space-y-6">
         {/* Header */}
@@ -1118,5 +1119,6 @@ export default function VolunteerDetail() {
         {bgToast}
       </div>
     )}
+    </>
   );
 }
