@@ -185,6 +185,8 @@ async function requireAuth(req, res, next) {
   try {
     req.user = jwt.verify(h.slice(7), JWT_SECRET);
     req.orgId = req.user.orgId ?? req.user.sub;
+    // Location filter: restricted users can only see their assigned location
+    req.locationFilter = (req.user.locationRestricted && req.user.locationId) ? req.user.locationId : null;
     if (req.user.sid) {
       setImmediate(() =>
         pool.query('UPDATE user_sessions SET last_seen = NOW() WHERE id = $1', [req.user.sid]).catch(() => {})
@@ -280,6 +282,7 @@ function mapVolunteer(r) {
     tags: r.tags ?? [],
     hoursContributed: r.hours_contributed,
     status: r.status,
+    locationId: r.location_id ?? null,
   };
 }
 
@@ -313,6 +316,7 @@ function mapEvent(r) {
     updatedAt: r.updated_at,
     participantCount: parseInt(r.participant_count ?? 0, 10),
     applicationCount: parseInt(r.application_count ?? 0, 10),
+    locationId: r.location_id ?? null,
   };
 }
 
@@ -566,7 +570,7 @@ app.post('/api/auth/login', writeLimiter, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Email and password are required' });
     }
     const { rows } = await pool.query(
-      'SELECT id, email, password_hash, full_name, org_name, role, org_id FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, full_name, org_name, role, org_id, location_id, location_restricted FROM users WHERE email = $1',
       [email.trim().toLowerCase()]
     );
     const user = rows[0];
@@ -579,7 +583,12 @@ app.post('/api/auth/login', writeLimiter, async (req, res) => {
       [sid, user.id, req.headers['user-agent'] || '', req.ip || '']
     );
     const token = jwt.sign(
-      { sub: user.id, email: user.email, fullName: user.full_name, role: user.role, sid, orgId: user.org_id || user.id },
+      {
+        sub: user.id, email: user.email, fullName: user.full_name, role: user.role, sid,
+        orgId: user.org_id || user.id,
+        locationId: user.location_id || null,
+        locationRestricted: user.location_restricted || false,
+      },
       JWT_SECRET, { expiresIn: JWT_EXPIRES_IN }
     );
     pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]).catch(() => {});
@@ -1223,6 +1232,13 @@ app.get('/api/volunteers', requireAuth, async (req, res) => {
     const params = [req.orgId];
     let idx = 2;
 
+    // Location filter: restricted users see only their location; admins can pass ?locationId=
+    const locFilter = req.locationFilter || (req.query.locationId && typeof req.query.locationId === 'string' ? req.query.locationId : null);
+    if (locFilter) {
+      conditions.push(`location_id = $${idx++}`);
+      params.push(locFilter);
+    }
+
     if (search && typeof search === 'string') {
       const s = `%${search.toLowerCase()}%`;
       conditions.push(`(LOWER(first_name || ' ' || last_name) LIKE $${idx} OR LOWER(email) LIKE $${idx + 1})`);
@@ -1686,6 +1702,12 @@ app.get('/api/events', requireAuth, async (req, res) => {
     const params = [req.orgId];
     let idx = 2;
 
+    const locFilter = req.locationFilter || (req.query.locationId && typeof req.query.locationId === 'string' ? req.query.locationId : null);
+    if (locFilter) {
+      conditions.push(`e.location_id = $${idx++}`);
+      params.push(locFilter);
+    }
+
     if (status && typeof status === 'string') {
       conditions.push(`e.status = $${idx++}`);
       params.push(status);
@@ -1931,6 +1953,12 @@ app.get('/api/applications', requireAuth, requirePlan('grow'), async (req, res) 
     const conditions = [`a.org_id = $1`];
     const params = [req.orgId];
     let idx = 2;
+
+    const locFilter = req.locationFilter || (req.query.locationId && typeof req.query.locationId === 'string' ? req.query.locationId : null);
+    if (locFilter) {
+      conditions.push(`a.location_id = $${idx++}`);
+      params.push(locFilter);
+    }
 
     if (status && typeof status === 'string') {
       conditions.push(`a.status = $${idx++}`);
@@ -4144,6 +4172,90 @@ app.put('/api/messaging', requireAuth, writeLimiter, async (req, res) => {
   } catch (err) {
     console.error('PUT /api/messaging error:', err.message);
     res.status(500).json({ success: false, error: 'Failed to save messaging settings' });
+  }
+});
+
+// ===== LOCATIONS =====
+
+app.get('/api/locations', requireAuth, requirePlan('enterprise'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM locations WHERE org_id = $1 ORDER BY name ASC',
+      [req.orgId]
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('GET /api/locations error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch locations' });
+  }
+});
+
+app.post('/api/locations', requireAuth, requirePlan('enterprise'), writeLimiter, async (req, res) => {
+  const { name, address = '', color = '#6366f1', description = '' } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ success: false, error: 'Name is required' });
+  try {
+    const id = `loc_${Date.now()}`;
+    const { rows } = await pool.query(
+      `INSERT INTO locations (id, org_id, name, address, color, description)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [id, req.orgId, name.trim().slice(0, 100), address.trim().slice(0, 200), color.slice(0, 20), description.trim().slice(0, 300)]
+    );
+    logAudit({ req, category: 'settings', verb: 'created', resource: 'Location', detail: rows[0].name });
+    res.status(201).json({ success: true, data: rows[0] });
+  } catch (err) {
+    console.error('POST /api/locations error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to create location' });
+  }
+});
+
+app.put('/api/locations/:id', requireAuth, requirePlan('enterprise'), writeLimiter, async (req, res) => {
+  const { name, address, color, description, active } = req.body;
+  try {
+    const { rows: existing } = await pool.query('SELECT * FROM locations WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    if (!existing.length) return res.status(404).json({ success: false, error: 'Location not found' });
+    const loc = existing[0];
+    const { rows } = await pool.query(
+      `UPDATE locations SET name=$1, address=$2, color=$3, description=$4, active=$5 WHERE id=$6 AND org_id=$7 RETURNING *`,
+      [
+        (name !== undefined ? name.trim().slice(0, 100) : loc.name),
+        (address !== undefined ? address.trim().slice(0, 200) : loc.address),
+        (color !== undefined ? color.slice(0, 20) : loc.color),
+        (description !== undefined ? description.trim().slice(0, 300) : loc.description),
+        (active !== undefined ? active : loc.active),
+        req.params.id, req.orgId,
+      ]
+    );
+    logAudit({ req, category: 'settings', verb: 'updated', resource: 'Location', detail: rows[0].name });
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    console.error('PUT /api/locations/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to update location' });
+  }
+});
+
+app.delete('/api/locations/:id', requireAuth, requirePlan('enterprise'), writeLimiter, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM locations WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Location not found' });
+    // Check if any records are assigned to this location
+    const [vols, evts] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM volunteers WHERE location_id = $1', [req.params.id]),
+      pool.query('SELECT COUNT(*) FROM events WHERE location_id = $1', [req.params.id]),
+    ]);
+    const volCount = parseInt(vols.rows[0].count, 10);
+    const evtCount = parseInt(evts.rows[0].count, 10);
+    if (volCount > 0 || evtCount > 0) {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot delete — ${volCount} volunteer(s) and ${evtCount} event(s) are assigned to this location. Reassign them first.`,
+      });
+    }
+    await pool.query('DELETE FROM locations WHERE id = $1 AND org_id = $2', [req.params.id, req.orgId]);
+    logAudit({ req, category: 'settings', verb: 'deleted', resource: 'Location', detail: rows[0].name });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/locations/:id error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to delete location' });
   }
 });
 

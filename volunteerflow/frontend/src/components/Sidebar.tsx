@@ -21,7 +21,37 @@ import {
   HelpCircle,
   Clock,
   BarChart2,
+  MapPin,
+  ChevronDown,
 } from 'lucide-react';
+import { api } from '@/lib/api';
+
+interface Location { id: string; name: string; color: string; }
+
+const LOC_KEY = 'vf_location_id';
+const LOC_NAME_KEY = 'vf_location_name';
+
+function getStoredLocation(): { id: string; name: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const id = sessionStorage.getItem(LOC_KEY);
+    const name = sessionStorage.getItem(LOC_NAME_KEY);
+    return id && name ? { id, name } : null;
+  } catch { return null; }
+}
+
+function setStoredLocation(loc: Location | null) {
+  try {
+    if (loc) {
+      sessionStorage.setItem(LOC_KEY, loc.id);
+      sessionStorage.setItem(LOC_NAME_KEY, loc.name);
+    } else {
+      sessionStorage.removeItem(LOC_KEY);
+      sessionStorage.removeItem(LOC_NAME_KEY);
+    }
+    window.dispatchEvent(new CustomEvent('vf:locationchange'));
+  } catch { /* ignore */ }
+}
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -57,10 +87,24 @@ function isDevUser(): boolean {
 export default function Sidebar() {
   const router = useRouter();
   const [showDev, setShowDev] = useState(false);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [selectedLoc, setSelectedLoc] = useState<{ id: string; name: string } | null>(null);
+  const [locOpen, setLocOpen] = useState(false);
 
   useEffect(() => {
     setShowDev(isDevUser());
+    setSelectedLoc(getStoredLocation());
+    api.get<{ data: Location[] }>('/locations')
+      .then((r) => { if (r.data?.length) setLocations(r.data); })
+      .catch(() => {});
   }, []);
+
+  const selectLocation = (loc: Location | null) => {
+    const stored = loc ? { id: loc.id, name: loc.name } : null;
+    setStoredLocation(loc);
+    setSelectedLoc(stored);
+    setLocOpen(false);
+  };
 
   return (
     <aside
@@ -130,6 +174,43 @@ export default function Sidebar() {
           </div>
         )}
       </nav>
+
+      {/* Location switcher — only shown when org has locations */}
+      {locations.length > 0 && (
+        <div className="px-3 pb-2 relative">
+          <button
+            onClick={() => setLocOpen((o) => !o)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors"
+          >
+            <MapPin className="w-3.5 h-3.5 shrink-0 text-neutral-400" />
+            <span className="flex-1 text-xs font-medium text-neutral-700 dark:text-neutral-300 text-left truncate">
+              {selectedLoc ? selectedLoc.name : 'All Locations'}
+            </span>
+            <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${locOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {locOpen && (
+            <div className="absolute bottom-full left-3 right-3 mb-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-lg overflow-hidden z-50">
+              <button
+                onClick={() => selectLocation(null)}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-medium hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors ${!selectedLoc ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20' : 'text-neutral-700 dark:text-neutral-300'}`}
+              >
+                <span className="w-2.5 h-2.5 rounded-full bg-neutral-300 dark:bg-neutral-600 shrink-0" />
+                All Locations
+              </button>
+              {locations.map((loc) => (
+                <button
+                  key={loc.id}
+                  onClick={() => selectLocation(loc)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-medium hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors ${selectedLoc?.id === loc.id ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20' : 'text-neutral-700 dark:text-neutral-300'}`}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: loc.color }} />
+                  {loc.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="px-3 py-3">

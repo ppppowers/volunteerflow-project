@@ -7,7 +7,7 @@ import Button from '@/components/Button';
 import { useTheme } from '@/context/ThemeContext';
 import { usePlan } from '@/context/usePlan';
 import { api } from '@/lib/api';
-import { PLANS, PlanId, BillingCycle, getYearlySavings } from '@/lib/pricing.config';
+import { PLANS, PlanId, BillingCycle, getYearlySavings, FeatureKey } from '@/lib/pricing.config';
 import {
   Building2,
   Bell,
@@ -39,6 +39,8 @@ import {
   Puzzle,
   KeyRound,
   CheckCircle2,
+  MapPin,
+  Lock,
 } from 'lucide-react';
 
 import { PlanGate } from '@/components/PlanGate';
@@ -50,6 +52,7 @@ type SettingsTab =
   | 'organization'
   | 'team'
   | 'roles'
+  | 'locations'
   | 'notifications'
   | 'messaging'
   | 'appearance'
@@ -2766,6 +2769,200 @@ const CHECKR_PACKAGES = [
   { value: 'volunteer_basic',   label: 'Volunteer Basic — Identity + national criminal' },
 ];
 
+// ─── Locations Tab ────────────────────────────────────────────────────────────
+
+interface Location {
+  id: string;
+  name: string;
+  address: string;
+  color: string;
+  description: string;
+  active: boolean;
+}
+
+const LOCATION_COLORS = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444',
+  '#f97316', '#eab308', '#22c55e', '#10b981',
+  '#14b8a6', '#06b6d4', '#3b82f6', '#64748b',
+];
+
+const BLANK_LOC = { name: '', address: '', color: '#6366f1', description: '' };
+
+function LocationsTab() {
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Location | null>(null);
+  const [form, setForm] = useState(BLANK_LOC);
+  const [error, setError] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+
+  useEffect(() => {
+    api.get<{ data: Location[] }>('/locations')
+      .then((r) => setLocations(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const openCreate = () => { setEditing(null); setForm(BLANK_LOC); setError(''); setShowForm(true); };
+  const openEdit = (loc: Location) => { setEditing(loc); setForm({ name: loc.name, address: loc.address, color: loc.color, description: loc.description }); setError(''); setShowForm(true); };
+  const cancel = () => { setShowForm(false); setEditing(null); setError(''); };
+
+  const save = async () => {
+    if (!form.name.trim()) { setError('Name is required'); return; }
+    setSaving(true); setError('');
+    try {
+      if (editing) {
+        const r = await api.put<{ data: Location }>(`/locations/${editing.id}`, form);
+        setLocations((p) => p.map((l) => l.id === editing.id ? r.data : l));
+      } else {
+        const r = await api.post<{ data: Location }>('/locations', form);
+        setLocations((p) => [...p, r.data]);
+      }
+      cancel();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (loc: Location) => {
+    setDeleteError('');
+    try {
+      await api.delete(`/locations/${loc.id}`);
+      setLocations((p) => p.filter((l) => l.id !== loc.id));
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete location');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            Create branches or sites within your organization. Assign volunteers and events to locations, and optionally restrict staff members to only see their location&apos;s data.
+          </p>
+        </div>
+        <Button onClick={openCreate} className="flex items-center gap-2 shrink-0">
+          <Plus className="w-4 h-4" /> Add Location
+        </Button>
+      </div>
+
+      {deleteError && (
+        <div className="flex items-start gap-2 p-3 bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-xl text-sm text-danger-700 dark:text-danger-400">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {deleteError}
+        </div>
+      )}
+
+      {/* Form */}
+      {showForm && (
+        <Card className="border-2 border-primary-200 dark:border-primary-800 space-y-4">
+          <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+            {editing ? 'Edit Location' : 'New Location'}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">Name *</label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Downtown Office"
+                className="w-full px-3 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">Address</label>
+              <input
+                type="text"
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                placeholder="123 Main St, City, ST"
+                className="w-full px-3 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">Description</label>
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="Optional description"
+                className="w-full px-3 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-2">Color</label>
+              <div className="flex flex-wrap gap-2">
+                {LOCATION_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setForm((f) => ({ ...f, color: c }))}
+                    className={`w-7 h-7 rounded-full transition-all ${form.color === c ? 'ring-2 ring-offset-2 ring-neutral-400 dark:ring-neutral-500 scale-110' : 'hover:scale-105'}`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          {error && <p className="text-sm text-danger-600 dark:text-danger-400">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Location'}</Button>
+            <Button variant="secondary" onClick={cancel}>Cancel</Button>
+          </div>
+        </Card>
+      )}
+
+      {/* List */}
+      {loading ? (
+        <div className="space-y-2">{[...Array(2)].map((_, i) => <div key={i} className="h-16 rounded-xl bg-neutral-100 dark:bg-neutral-800 animate-pulse" />)}</div>
+      ) : locations.length === 0 ? (
+        <div className="text-center py-12 text-neutral-400">
+          <MapPin className="w-8 h-8 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">No locations yet. Add your first branch or site.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {locations.map((loc) => (
+            <Card key={loc.id} className="flex items-center gap-4">
+              <div className="w-3 h-10 rounded-full shrink-0" style={{ backgroundColor: loc.color }} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{loc.name}</p>
+                  {!loc.active && (
+                    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500">Inactive</span>
+                  )}
+                </div>
+                {loc.address && <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{loc.address}</p>}
+                {loc.description && <p className="text-xs text-neutral-400 truncate">{loc.description}</p>}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => openEdit(loc)} className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">
+                  <Edit className="w-4 h-4" />
+                </button>
+                <button onClick={() => remove(loc)} className="p-1.5 rounded-lg hover:bg-danger-50 dark:hover:bg-danger-900/20 text-neutral-400 hover:text-danger-600 dark:hover:text-danger-400">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 text-sm text-neutral-600 dark:text-neutral-400 space-y-1.5">
+        <p className="font-semibold text-neutral-700 dark:text-neutral-300">How locations work</p>
+        <p>1. Create locations here for each branch, site, or office.</p>
+        <p>2. Assign volunteers and events to a location when creating or editing them.</p>
+        <p>3. In <strong>Team</strong> settings, assign a staff member to a location and enable <strong>Location Restricted</strong> — they will only see data for that location.</p>
+        <p>4. Admins can filter the dashboard to any location using the switcher in the sidebar.</p>
+      </div>
+    </div>
+  );
+}
+
 function IntegrationsTab() {
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
@@ -2917,10 +3114,11 @@ function IntegrationsTab() {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
-const TABS: { id: SettingsTab; label: string; icon: typeof Building2 }[] = [
+const TABS: { id: SettingsTab; label: string; icon: typeof Building2; featureKey?: FeatureKey }[] = [
   { id: 'organization', label: 'Organization',  icon: Building2     },
   { id: 'team',         label: 'Team',           icon: Users         },
   { id: 'roles',        label: 'Roles & Perms',  icon: Shield        },
+  { id: 'locations',    label: 'Locations',      icon: MapPin,        featureKey: 'locations' },
   { id: 'notifications',label: 'Notifications',  icon: Bell          },
   { id: 'messaging',    label: 'Messaging',      icon: Mail          },
   { id: 'appearance',   label: 'Appearance & Branding', icon: Palette   },
@@ -2932,13 +3130,15 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Building2 }[] = [
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('organization');
+  const { can } = usePlan();
 
   const renderTab = () => {
     switch (activeTab) {
       case 'organization':  return <OrganizationTab />;
       case 'team':          return <TeamTab />;
       case 'roles':         return <RolesTab />;
-case 'notifications': return <NotificationsTab />;
+      case 'locations':     return <LocationsTab />;
+      case 'notifications': return <NotificationsTab />;
       case 'messaging':     return <MessagingTab />;
       case 'appearance':    return <AppearanceTab />;
       case 'security':      return <SecurityTab />;
@@ -2966,6 +3166,20 @@ case 'notifications': return <NotificationsTab />;
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
+                const isLocked = !!tab.featureKey && !can(tab.featureKey);
+                if (isLocked) {
+                  return (
+                    <div
+                      key={tab.id}
+                      title="Upgrade to Enterprise to unlock this feature"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-neutral-400 dark:text-neutral-600 cursor-not-allowed select-none"
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      {tab.label}
+                      <Lock className="w-3 h-3 ml-auto flex-shrink-0" />
+                    </div>
+                  );
+                }
                 return (
                   <button
                     key={tab.id}

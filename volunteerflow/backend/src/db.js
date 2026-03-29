@@ -79,6 +79,20 @@ const SCHEMA_SQL = `
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  -- ── Locations (branches/sites within an org) ─────────────────────────────────
+  CREATE TABLE IF NOT EXISTS locations (
+    id          TEXT        PRIMARY KEY,
+    org_id      TEXT        NOT NULL,
+    name        TEXT        NOT NULL,
+    address     TEXT        NOT NULL DEFAULT '',
+    color       TEXT        NOT NULL DEFAULT '#6366f1',
+    description TEXT        NOT NULL DEFAULT '',
+    active      BOOLEAN     NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_locations_org ON locations(org_id);
+
   -- ── Org roles (system-wide; shared across all orgs) ───────────────────────────
   CREATE TABLE IF NOT EXISTS org_roles (
     id          TEXT    PRIMARY KEY,
@@ -531,6 +545,14 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_audit_logs_category  ON audit_logs(category);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_user_name ON audit_logs(user_name);
   CREATE INDEX IF NOT EXISTS idx_audit_logs_verb      ON audit_logs(verb);
+
+  -- ── Location columns (multi-location support) ────────────────────────────────
+  ALTER TABLE users                ADD COLUMN IF NOT EXISTS location_id TEXT;
+  ALTER TABLE users                ADD COLUMN IF NOT EXISTS location_restricted BOOLEAN NOT NULL DEFAULT false;
+  ALTER TABLE volunteers           ADD COLUMN IF NOT EXISTS location_id TEXT;
+  ALTER TABLE events               ADD COLUMN IF NOT EXISTS location_id TEXT;
+  ALTER TABLE applications         ADD COLUMN IF NOT EXISTS location_id TEXT;
+  ALTER TABLE volunteer_hours_log  ADD COLUMN IF NOT EXISTS location_id TEXT;
 
   -- ── Backward-compat migrations (no-ops on fresh installs) ────────────────────
   ALTER TABLE users            ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';

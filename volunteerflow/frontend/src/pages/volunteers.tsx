@@ -124,6 +124,7 @@ interface Volunteer {
   hours?: HourEntry[];
   badges?: VolunteerBadge[];
   completedTrainings?: { courseId: string; courseTitle: string; completedAt: string; }[];
+  locationId?: string | null;
 }
 
 // --- Import Wizard ---
@@ -402,6 +403,7 @@ interface ApiVolunteer {
   tags?: string[];
   hoursContributed?: number;
   status: string;
+  locationId?: string | null;
 }
 
 function mapApiVolunteer(v: ApiVolunteer): Volunteer {
@@ -424,6 +426,7 @@ function mapApiVolunteer(v: ApiVolunteer): Volunteer {
     rating: 0,
     events: [],
     checklist: [],
+    locationId: v.locationId ?? null,
   };
 }
 
@@ -431,6 +434,7 @@ export default function Volunteers() {
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
   const [loading, setLoading] = useState(true);
   const [usingMockData, setUsingMockData] = useState(false);
+  const [locationMap, setLocationMap] = useState<Record<string, { name: string; color: string }>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
@@ -527,27 +531,34 @@ export default function Volunteers() {
     avatar: ''
   });
 
-  // Fetch volunteers from backend on mount; fall back to mock data if unreachable
-  useEffect(() => {
-    let cancelled = false;
+  const fetchVolunteers = (locationId?: string | null) => {
+    const locId = locationId !== undefined ? locationId : (sessionStorage.getItem('vf_location_id') || null);
+    const qs = locId ? `/volunteers?limit=100&locationId=${encodeURIComponent(locId)}` : '/volunteers?limit=100';
     setLoading(true);
-    api.get<ApiVolunteer[]>('/volunteers?limit=100')
-      .then((data) => {
-        if (!cancelled) {
-          setVolunteers(data.map(mapApiVolunteer));
-          setUsingMockData(false);
-        }
+    api.get<ApiVolunteer[]>(qs)
+      .then((data) => { setVolunteers(data.map(mapApiVolunteer)); setUsingMockData(false); })
+      .catch(() => { setVolunteers(mockVolunteers); setUsingMockData(true); })
+      .finally(() => setLoading(false));
+  };
+
+  // Fetch locations for badge display
+  useEffect(() => {
+    api.get<{ data: { id: string; name: string; color: string }[] }>('/locations')
+      .then((r) => {
+        const map: Record<string, { name: string; color: string }> = {};
+        (r.data ?? []).forEach((l) => { map[l.id] = { name: l.name, color: l.color }; });
+        setLocationMap(map);
       })
-      .catch(() => {
-        if (!cancelled) {
-          setVolunteers(mockVolunteers);
-          setUsingMockData(true);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
+      .catch(() => {});
+  }, []);
+
+  // Fetch volunteers on mount and whenever the sidebar location filter changes
+  useEffect(() => {
+    fetchVolunteers();
+    const handler = () => fetchVolunteers();
+    window.addEventListener('vf:locationchange', handler);
+    return () => window.removeEventListener('vf:locationchange', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reset to page 1 when search/filter changes
@@ -956,10 +967,16 @@ export default function Volunteers() {
                     {volunteer.name}
                   </h3>
                   
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center justify-center flex-wrap gap-1.5 mb-2">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusConfig[volunteer.status].bg} ${statusConfig[volunteer.status].text}`}>
                       {statusConfig[volunteer.status].label}
                     </span>
+                    {volunteer.locationId && locationMap[volunteer.locationId] && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: locationMap[volunteer.locationId].color }} />
+                        {locationMap[volunteer.locationId].name}
+                      </span>
+                    )}
                     {volunteer.rating > 0 && (
                       <div className="flex items-center text-xs text-warning-600 dark:text-warning-400">
                         <Star className="w-3 h-3 fill-current mr-0.5" />

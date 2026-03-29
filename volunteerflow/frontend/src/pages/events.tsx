@@ -126,6 +126,7 @@ interface VolunteerEvent {
   notes?: string;
   needLead?: boolean;
   leadTag?: string;
+  locationId?: string | null;
 }
 
 type PageView = 'list' | 'builder' | 'detail';
@@ -449,6 +450,7 @@ interface ApiEvent {
   eligibility?: EligibilitySettings;
   createdAt?: string;
   updatedAt?: string;
+  locationId?: string | null;
 }
 
 const API_TO_EVENT_STATUS: Record<string, EventStatus> = {
@@ -495,6 +497,7 @@ function mapApiEvent(v: ApiEvent): VolunteerEvent {
     notes: v.notes,
     needLead: v.needLead ?? false,
     leadTag: v.leadTag,
+    locationId: v.locationId ?? null,
   };
 }
 
@@ -533,6 +536,7 @@ export default function Events() {
   const [events, setEvents] = useState<VolunteerEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [usingMockData, setUsingMockData] = useState(false);
+  const [locationMap, setLocationMap] = useState<Record<string, { name: string; color: string }>>({});
   const [editingEvent, setEditingEvent] = useState<VolunteerEvent | null>(null);
   const [activeEvent, setActiveEvent] = useState<VolunteerEvent | null>(null);
   const [openShiftId, setOpenShiftId] = useState<string | null>(null);
@@ -573,25 +577,34 @@ export default function Events() {
   const [leadTagInput, setLeadTagInput] = useState('');
   const [showLeadTagDropdown, setShowLeadTagDropdown] = useState(false);
 
-  // Fetch events from backend on mount; fall back to mock data if unreachable
+  // Fetch locations for badge display
   useEffect(() => {
-    let cancelled = false;
+    api.get<{ data: { id: string; name: string; color: string }[] }>('/locations')
+      .then((r) => {
+        const map: Record<string, { name: string; color: string }> = {};
+        (r.data ?? []).forEach((l) => { map[l.id] = { name: l.name, color: l.color }; });
+        setLocationMap(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  const fetchEvents = (locationId?: string | null) => {
+    const locId = locationId !== undefined ? locationId : (sessionStorage.getItem('vf_location_id') || null);
+    const qs = locId ? `/events?limit=100&locationId=${encodeURIComponent(locId)}` : '/events?limit=100';
     setLoading(true);
-    api.get<ApiEvent[]>('/events?limit=100')
-      .then((data) => {
-        if (!cancelled) {
-          setEvents(data.map(mapApiEvent));
-          setUsingMockData(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setEvents(MOCK_EVENTS);
-          setUsingMockData(true);
-        }
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    api.get<ApiEvent[]>(qs)
+      .then((data) => { setEvents(data.map(mapApiEvent)); setUsingMockData(false); })
+      .catch(() => { setEvents(MOCK_EVENTS); setUsingMockData(true); })
+      .finally(() => setLoading(false));
+  };
+
+  // Fetch events on mount and whenever the sidebar location filter changes
+  useEffect(() => {
+    fetchEvents();
+    const handler = () => fetchEvents();
+    window.addEventListener('vf:locationchange', handler);
+    return () => window.removeEventListener('vf:locationchange', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load org's volunteer tags for the lead-tag picker
@@ -959,6 +972,15 @@ export default function Events() {
                       </span>
                     )}
                   </div>
+
+                  {ev.locationId && locationMap[ev.locationId] && (
+                    <div className="mb-2">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: locationMap[ev.locationId].color }} />
+                        {locationMap[ev.locationId].name}
+                      </span>
+                    </div>
+                  )}
 
                   <p className="text-sm text-neutral-500 dark:text-neutral-400 line-clamp-2 mb-3">
                     {ev.description || 'No description'}

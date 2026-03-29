@@ -40,7 +40,8 @@ export type FeatureKey =
   | 'custom_integrations'
   | 'sla_guarantee'
   | 'qr_codes'
-  | 'qr_analytics';
+  | 'qr_analytics'
+  | 'locations';
 
 export type FeatureValue = boolean | number | string;
 
@@ -77,6 +78,7 @@ export interface PlanFeatures {
   sla_guarantee: boolean;
   qr_codes: boolean;
   qr_analytics: boolean;
+  locations: boolean;
 }
 
 export interface Plan {
@@ -184,6 +186,7 @@ export const FEATURE_GROUPS: FeatureGroup[] = [
   {
     title: 'Enterprise Power',
     features: [
+      { key: 'locations', label: 'Multi-location management', tooltip: 'Separate your volunteers, events, and staff across multiple locations or sites' },
       { key: 'leader_user_type', label: 'Leader / captain user type', tooltip: 'Designate volunteer leaders and captains with elevated permissions' },
       { key: 'job_notifications', label: 'Job notifications', tooltip: 'Notify staff and leaders when specific roles are filled or vacated' },
       { key: 'shift_permissions', label: 'Shift permissions', tooltip: 'Fine-grained controls over who can create, edit, or close shifts' },
@@ -251,6 +254,7 @@ export const PLANS: Record<PlanId, Plan> = {
       sla_guarantee: false,
       qr_codes: true,
       qr_analytics: false,
+      locations: false,
     },
   },
 
@@ -304,6 +308,7 @@ export const PLANS: Record<PlanId, Plan> = {
       sla_guarantee: false,
       qr_codes: true,
       qr_analytics: true,
+      locations: false,
     },
   },
 
@@ -356,6 +361,7 @@ export const PLANS: Record<PlanId, Plan> = {
       sla_guarantee: true,
       qr_codes: true,
       qr_analytics: true,
+      locations: true,
     },
   },
 };
